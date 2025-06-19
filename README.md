@@ -85,6 +85,9 @@ Before compiling, update the network settings to match your environment.
   - Check the Device Manager. If needed, install the CP210x driver.
 - **Performance or Memory Issues**:
   - Set PSRAM to `Enabled` and Partition Scheme to `Minimal SPIFFS`.
+- **Issues**:
+  - BTC Price and Diff starting to update after one minute after a restart (fallback used before that)
+  - Blk/Yr uses a fallback Networkhashrate (working on API)
 
 ## License
 
