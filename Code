@@ -1,0 +1,302 @@
+#include <lvgl.h>
+#include <TFT_eSPI.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include "Background.h"
+
+TFT_eSPI tft;
+lv_disp_t* disp;
+
+const char* ssid = "YourWifiName";
+const char* pwd = "YourWifiPW";
+const char* bitaxe_url = "http://YourBitaxeIp/api/system/info";
+const char* coinbase_price_url = "https://api.coinbase.com/v2/prices/spot?currency=USD";
+const char* blockchain_difficulty_url = "https://blockchain.info/q/getdifficulty";
+
+lv_obj_t* label_status;
+lv_obj_t* label_hashrate;
+lv_obj_t* label_shares;
+lv_obj_t* label_best;
+lv_obj_t* label_session;
+lv_obj_t* label_temp;
+lv_obj_t* label_block_chance; 
+lv_obj_t* label_btc_price;    
+lv_obj_t* label_network_diff;
+
+void flush_cb(lv_disp_drv_t* disp_drv, const lv_area_t* area, lv_color_t* color_p)
+{
+    uint16_t w = area->x2 - area->x1 + 1;
+    uint16_t h = area->y2 - area->y1 + 1;
+
+    tft.startWrite();
+    tft.setAddrWindow(area->x1, area->y1, w, h);
+    tft.pushColors((uint16_t*)color_p, w * h, true);
+    tft.endWrite();
+
+    lv_disp_flush_ready(disp_drv);
+}
+
+void create_ui()
+{
+    lv_obj_t* scr = lv_scr_act();
+
+    label_status = lv_label_create(scr);
+    lv_obj_set_pos(label_status, 20, 170);
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_status, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_status, "");
+
+    label_hashrate = lv_label_create(scr);
+    lv_obj_set_pos(label_hashrate, 20, 50);
+    lv_obj_set_style_text_color(label_hashrate, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_hashrate, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_hashrate, "HASHRATE: --");
+
+    label_shares = lv_label_create(scr);
+    lv_obj_set_pos(label_shares, 20, 75);
+    lv_obj_set_style_text_color(label_shares, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_shares, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_shares, "SHARES: --");
+
+    label_best = lv_label_create(scr);
+    lv_obj_set_pos(label_best, 20, 100);
+    lv_obj_set_style_text_color(label_best, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_best, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_best, "BEST: --");
+
+    label_session = lv_label_create(scr);
+    lv_obj_set_pos(label_session, 20, 125);
+    lv_obj_set_style_text_color(label_session, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_session, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_session, "SESSION: --");
+
+    label_temp = lv_label_create(scr);
+    lv_obj_set_pos(label_temp, 20, 150);
+    lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_temp, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_temp, "TEMP: --");
+
+    label_btc_price = lv_label_create(scr);
+    lv_obj_set_pos(label_btc_price, 5, 5);
+    lv_obj_set_style_text_color(label_btc_price, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_btc_price, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_btc_price, "BTC: -- USD");
+
+    label_network_diff = lv_label_create(scr);
+    lv_obj_set_pos(label_network_diff, 5, 200);
+    lv_obj_set_style_text_color(label_network_diff, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_network_diff, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_network_diff, "Difficulty: -- T");
+
+    label_block_chance = lv_label_create(scr);
+    lv_obj_set_pos(label_block_chance, 5, 220);
+    lv_obj_set_style_text_color(label_block_chance, lv_color_hex(0xF7931A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_block_chance, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_block_chance, "Blk/Yr: --");
+}
+
+void setup()
+{
+    Serial.begin(115200);
+    delay(1000);
+
+    tft.init();
+    tft.setRotation(2);
+    tft.fillScreen(TFT_BLACK);
+
+    lv_init();
+
+    static lv_color_t* buf1 = nullptr;
+    static lv_color_t* buf2 = nullptr;
+
+    if (ESP.getPsramSize() > 0) {
+        buf1 = (lv_color_t*)ps_malloc(320 * 60 * sizeof(lv_color_t));
+        buf2 = (lv_color_t*)ps_malloc(320 * 60 * sizeof(lv_color_t));
+    } else {
+        static lv_color_t buf1_fallback[320 * 20];
+        static lv_color_t buf2_fallback[320 * 20];
+        buf1 = buf1_fallback;
+        buf2 = buf2_fallback;
+    }
+
+    static lv_disp_draw_buf_t draw_buf;
+    lv_disp_draw_buf_init(&draw_buf, buf1, buf2,
+                          (ESP.getPsramSize() > 0) ? 320 * 60 : 320 * 20);
+
+    static lv_disp_drv_t disp_drv;
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res = 320;
+    disp_drv.ver_res = 240;
+    disp_drv.flush_cb = flush_cb;
+    disp_drv.draw_buf = &draw_buf;
+    disp = lv_disp_drv_register(&disp_drv);
+
+    lv_obj_t* scr = lv_scr_act();
+    lv_obj_set_style_bg_img_src(scr, &background, LV_PART_MAIN);
+
+    create_ui();
+
+    WiFi.begin(ssid, pwd);
+    lv_label_set_text(label_status, "CONNECTING WIFI...");
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0xFFFF00), LV_PART_MAIN);
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(300);
+        lv_task_handler();
+    }
+
+    lv_label_set_text(label_status, "");
+}
+
+void update_data()
+{
+    static unsigned long lastBitaxeUpdate = 0;
+    static unsigned long lastApiUpdate = 0;
+    static double btc_price_usd = 0.0;
+    static double networkDifficulty = 1.269823e14;
+
+    if (millis() - lastBitaxeUpdate >= 5000) {
+        update_bitaxe_data();
+        lastBitaxeUpdate = millis();
+    }
+
+    if (millis() - lastApiUpdate >= 60000) {
+        update_api_data(&btc_price_usd, &networkDifficulty);
+        lastApiUpdate = millis();
+    }
+
+    char btc_price_str[20];
+    if (btc_price_usd > 0) {
+        snprintf(btc_price_str, sizeof(btc_price_str), "BTC: %.0f USD", btc_price_usd);
+    } else {
+        snprintf(btc_price_str, sizeof(btc_price_str), "BTC: N/A USD");
+    }
+    lv_label_set_text(label_btc_price, btc_price_str);
+
+    char diff_str[30];
+    snprintf(diff_str, sizeof(diff_str), "Difficulty: %.2f T", networkDifficulty / 1e12);
+    lv_label_set_text(label_network_diff, diff_str);
+
+    lv_obj_invalidate(lv_scr_act());
+    lv_refr_now(disp);
+}
+
+void update_bitaxe_data()
+{
+    if (WiFi.status() != WL_CONNECTED) {
+        WiFi.reconnect();
+        lv_label_set_text(label_status, "WIFI DISCONNECTED");
+        lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(bitaxe_url);
+    
+    if (http.GET() == 200) {
+        String jsonResponse = http.getString();
+        StaticJsonDocument<2048> doc;
+        DeserializationError error = deserializeJson(doc, jsonResponse);
+        if (error) {
+            lv_label_set_text(label_status, "JSON ERROR");
+            lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
+        } else {
+            float hashRateGHs = doc["hashRate"].as<float>();
+            float hashRate = hashRateGHs / 1000.0;
+            int sharesAccepted = doc["sharesAccepted"].as<int>();
+            int sharesRejected = doc["sharesRejected"].as<int>();
+            String bestDiff = doc["bestDiff"].as<String>();
+            String sessionDiff = doc["bestSessionDiff"].as<String>();
+            float temp = doc["temp"].as<float>();
+            float power = doc["power"].as<float>();
+
+            char hashrate_str[10];
+            char temp_str[10];
+            char power_str[10];
+            snprintf(hashrate_str, sizeof(hashrate_str), "1.%02d", (int)(hashRate * 100) % 100);
+            snprintf(temp_str, sizeof(temp_str), "%.1f", temp);
+            snprintf(power_str, sizeof(power_str), "%.1f", power);
+
+            String label_hashrate_text = String("HASHRATE: ") + hashrate_str + " TH/s";
+            String label_temp_power_text = String("TEMP: ") + temp_str + "°C | PWR: " + power_str + "W";
+
+            lv_label_set_text(label_hashrate, label_hashrate_text.c_str());
+            lv_label_set_text_fmt(label_shares, "SHARES: %d / %d", sharesAccepted, sharesRejected);
+            lv_label_set_text_fmt(label_best, "BEST: %s", bestDiff.c_str());
+            lv_label_set_text_fmt(label_session, "SESSION: %s", sessionDiff.c_str());
+
+            if (temp < 60) {
+                lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
+            } else {
+                lv_obj_set_style_text_color(label_temp, lv_color_hex(0xFF0000), LV_PART_MAIN);
+            }
+
+            lv_label_set_text(label_temp, label_temp_power_text.c_str());
+            lv_label_set_text(label_status, "");
+
+            double networkHashrate = 876.51e18;
+            double hashRateHs = hashRate * 1e12;
+            double blocksPerYear = (60.0 / 10.0) * 24 * 365;
+            double blockChancePerYear = 0.0;
+            if (networkHashrate > 0) {
+                blockChancePerYear = (hashRateHs / networkHashrate) * blocksPerYear * 100;
+            }
+
+            if (blockChancePerYear > 1.0 || blockChancePerYear < 0.0001) {
+                hashRateHs = hashRate * 1e9;
+                if (networkHashrate > 0) {
+                    blockChancePerYear = (hashRateHs / networkHashrate) * blocksPerYear * 100;
+                }
+            }
+
+            char chance_str[12];
+            snprintf(chance_str, sizeof(chance_str), "%.4f", blockChancePerYear);
+            String label_block_chance_text = String("Blk/Yr: ") + chance_str + "%";
+            lv_label_set_text(label_block_chance, label_block_chance_text.c_str());
+        }
+    } else {
+        lv_label_set_text(label_status, "HTTP ERROR");
+        lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
+    }
+
+    http.end();
+}
+
+void update_api_data(double* btc_price_usd, double* networkDifficulty)
+{
+    HTTPClient http_price;
+    http_price.begin(coinbase_price_url);
+
+    if (http_price.GET() == 200) {
+        String priceResponse = http_price.getString();
+        StaticJsonDocument<512> priceDoc;
+        DeserializationError priceError = deserializeJson(priceDoc, priceResponse);
+        if (!priceError) {
+            *btc_price_usd = priceDoc["data"]["amount"].as<double>();
+        }
+    } else {
+        if (*btc_price_usd == 0.0) {
+            *btc_price_usd = 105031.0;
+        }
+    }
+    http_price.end();
+
+    HTTPClient http_network;
+    http_network.begin(blockchain_difficulty_url);
+
+    if (http_network.GET() == 200) {
+        String difficultyResponse = http_network.getString();
+        double newDifficulty = difficultyResponse.toDouble();
+        if (newDifficulty > 0) {
+            *networkDifficulty = newDifficulty;
+        }
+    }
+    http_network.end();
+}
+
+void loop()
+{
+    lv_task_handler();
+    update_data();
+}
