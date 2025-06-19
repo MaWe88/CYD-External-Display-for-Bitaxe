@@ -13,6 +13,7 @@ const char* pwd = "YourWifiPW";
 const char* bitaxe_url = "http://YourBitaxeIp/api/system/info";
 const char* coinbase_price_url = "https://api.coinbase.com/v2/prices/spot?currency=USD";
 const char* blockchain_difficulty_url = "https://blockchain.info/q/getdifficulty";
+const char* blockchain_hashrate_url = "https://blockchain.info/q/hashrate";
 
 lv_obj_t* label_status;
 lv_obj_t* label_hashrate;
@@ -23,6 +24,13 @@ lv_obj_t* label_temp;
 lv_obj_t* label_block_chance; 
 lv_obj_t* label_btc_price;    
 lv_obj_t* label_network_diff;
+
+double btc_price_usd = 0.0;
+double networkDifficulty = 1.269823e14;
+double networkHashrate = 876.51e18;
+
+bool api_update_requested = false;
+SemaphoreHandle_t api_data_mutex;
 
 void flush_cb(lv_disp_drv_t* disp_drv, const lv_area_t* area, lv_color_t* color_p)
 {
@@ -96,10 +104,72 @@ void create_ui()
     lv_label_set_text(label_block_chance, "Blk/Yr: --");
 }
 
+void api_task(void *pvParameters)
+{
+    while (1) {
+        if (api_update_requested) {
+            api_update_requested = false;
+            
+            HTTPClient http_price;
+            http_price.setTimeout(5000);
+            http_price.begin(coinbase_price_url);
+            
+            if (http_price.GET() == 200) {
+                String priceResponse = http_price.getString();
+                StaticJsonDocument<512> priceDoc;
+                DeserializationError priceError = deserializeJson(priceDoc, priceResponse);
+                if (!priceError) {
+                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
+                        btc_price_usd = priceDoc["data"]["amount"].as<double>();
+                        xSemaphoreGive(api_data_mutex);
+                    }
+                }
+            }
+            http_price.end();
+            
+            HTTPClient http_difficulty;
+            http_difficulty.setTimeout(5000);
+            http_difficulty.begin(blockchain_difficulty_url);
+            
+            if (http_difficulty.GET() == 200) {
+                String difficultyResponse = http_difficulty.getString();
+                double newDifficulty = difficultyResponse.toDouble();
+                if (newDifficulty > 0) {
+                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
+                        networkDifficulty = newDifficulty;
+                        xSemaphoreGive(api_data_mutex);
+                    }
+                }
+            }
+            http_difficulty.end();
+            
+            HTTPClient http_hashrate;
+            http_hashrate.setTimeout(5000);
+            http_hashrate.begin(blockchain_hashrate_url);
+            
+            if (http_hashrate.GET() == 200) {
+                String hashrateResponse = http_hashrate.getString();
+                double newHashrate = hashrateResponse.toDouble();
+                if (newHashrate > 0) {
+                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
+                        networkHashrate = newHashrate * 1e9;
+                        xSemaphoreGive(api_data_mutex);
+                    }
+                }
+            }
+            http_hashrate.end();
+        }
+        
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
+
+    api_data_mutex = xSemaphoreCreateMutex();
 
     tft.init();
     tft.setRotation(2);
@@ -146,6 +216,22 @@ void setup()
         lv_task_handler();
     }
 
+    lv_label_set_text(label_status, "LOADING DATA...");
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0x00FF00), LV_PART_MAIN);
+    lv_task_handler();
+    
+    xTaskCreatePinnedToCore(
+        api_task,
+        "API_Task",
+        8192,
+        NULL,
+        1,
+        NULL,
+        0
+    );
+    
+    api_update_requested = true;
+    
     lv_label_set_text(label_status, "");
 }
 
@@ -153,8 +239,6 @@ void update_data()
 {
     static unsigned long lastBitaxeUpdate = 0;
     static unsigned long lastApiUpdate = 0;
-    static double btc_price_usd = 0.0;
-    static double networkDifficulty = 1.269823e14;
 
     if (millis() - lastBitaxeUpdate >= 5000) {
         update_bitaxe_data();
@@ -162,21 +246,25 @@ void update_data()
     }
 
     if (millis() - lastApiUpdate >= 60000) {
-        update_api_data(&btc_price_usd, &networkDifficulty);
+        api_update_requested = true;
         lastApiUpdate = millis();
     }
 
-    char btc_price_str[20];
-    if (btc_price_usd > 0) {
-        snprintf(btc_price_str, sizeof(btc_price_str), "BTC: %.0f USD", btc_price_usd);
-    } else {
-        snprintf(btc_price_str, sizeof(btc_price_str), "BTC: N/A USD");
-    }
-    lv_label_set_text(label_btc_price, btc_price_str);
+    if (xSemaphoreTake(api_data_mutex, 10)) {
+        char btc_price_str[20];
+        if (btc_price_usd > 0) {
+            snprintf(btc_price_str, sizeof(btc_price_str), "BTC: %.0f USD", btc_price_usd);
+        } else {
+            snprintf(btc_price_str, sizeof(btc_price_str), "BTC: N/A USD");
+        }
+        lv_label_set_text(label_btc_price, btc_price_str);
 
-    char diff_str[30];
-    snprintf(diff_str, sizeof(diff_str), "Difficulty: %.2f T", networkDifficulty / 1e12);
-    lv_label_set_text(label_network_diff, diff_str);
+        char diff_str[30];
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.2f T", networkDifficulty / 1e12);
+        lv_label_set_text(label_network_diff, diff_str);
+        
+        xSemaphoreGive(api_data_mutex);
+    }
 
     lv_obj_invalidate(lv_scr_act());
     lv_refr_now(disp);
@@ -192,6 +280,7 @@ void update_bitaxe_data()
     }
 
     HTTPClient http;
+    http.setTimeout(3000);
     http.begin(bitaxe_url);
     
     if (http.GET() == 200) {
@@ -235,19 +324,15 @@ void update_bitaxe_data()
             lv_label_set_text(label_temp, label_temp_power_text.c_str());
             lv_label_set_text(label_status, "");
 
-            double networkHashrate = 876.51e18;
             double hashRateHs = hashRate * 1e12;
             double blocksPerYear = (60.0 / 10.0) * 24 * 365;
             double blockChancePerYear = 0.0;
-            if (networkHashrate > 0) {
-                blockChancePerYear = (hashRateHs / networkHashrate) * blocksPerYear * 100;
-            }
-
-            if (blockChancePerYear > 1.0 || blockChancePerYear < 0.0001) {
-                hashRateHs = hashRate * 1e9;
+            
+            if (xSemaphoreTake(api_data_mutex, 10)) {
                 if (networkHashrate > 0) {
                     blockChancePerYear = (hashRateHs / networkHashrate) * blocksPerYear * 100;
                 }
+                xSemaphoreGive(api_data_mutex);
             }
 
             char chance_str[12];
@@ -261,38 +346,6 @@ void update_bitaxe_data()
     }
 
     http.end();
-}
-
-void update_api_data(double* btc_price_usd, double* networkDifficulty)
-{
-    HTTPClient http_price;
-    http_price.begin(coinbase_price_url);
-
-    if (http_price.GET() == 200) {
-        String priceResponse = http_price.getString();
-        StaticJsonDocument<512> priceDoc;
-        DeserializationError priceError = deserializeJson(priceDoc, priceResponse);
-        if (!priceError) {
-            *btc_price_usd = priceDoc["data"]["amount"].as<double>();
-        }
-    } else {
-        if (*btc_price_usd == 0.0) {
-            *btc_price_usd = 105031.0;
-        }
-    }
-    http_price.end();
-
-    HTTPClient http_network;
-    http_network.begin(blockchain_difficulty_url);
-
-    if (http_network.GET() == 200) {
-        String difficultyResponse = http_network.getString();
-        double newDifficulty = difficultyResponse.toDouble();
-        if (newDifficulty > 0) {
-            *networkDifficulty = newDifficulty;
-        }
-    }
-    http_network.end();
 }
 
 void loop()
