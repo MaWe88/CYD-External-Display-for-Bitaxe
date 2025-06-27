@@ -85,6 +85,8 @@ Before compiling, update the network settings to match your environment.
   - Check the Device Manager. If needed, install the CP210x driver.
 - **Performance or Memory Issues**:
   - Set PSRAM to `Enabled` and Partition Scheme to `Minimal SPIFFS`.
+- **Display Issues**:
+  - if your Display looks all scrambled up, search with Crtl + F for rotation and replace the 2 with 1 or 3. Some CYD use a different screen rotation.
 - **Issues**:
   - BTC Price and Diff starting to update after one minute after a restart (fallback used before that) (fixed with 1.1)
   - Blk/Yr uses a fallback Networkhashrate (working on API) (added with 1.1)
