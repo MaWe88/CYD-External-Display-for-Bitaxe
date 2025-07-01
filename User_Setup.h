@@ -16,20 +16,20 @@
 #define TFT_SCLK 14
 #define TFT_CS   15
 #define TFT_DC   2
-#define TFT_RST  -1  
+#define TFT_RST  -1  // Kein Reset-Pin
 #define TFT_BL   21
 #define TFT_BACKLIGHT_ON HIGH
 #define TOUCH_CS 33
 
 // ── SPI-Geschwindigkeiten ───────────────────────────────
-#define SPI_FREQUENCY       27000000  
-#define SPI_READ_FREQUENCY  20000000  
-#define SPI_TOUCH_FREQUENCY 2500000   
+#define SPI_FREQUENCY       27000000  // 27MHz für bessere Performance
+#define SPI_READ_FREQUENCY  20000000  // 20MHz für Lesen
+#define SPI_TOUCH_FREQUENCY 2500000   // 2.5MHz für Touch
 
 // ── Wichtige LVGL-Optimierungen ─────────────────────────
-#define CGRAM_OFFSET                  
-#define SUPPORT_TRANSACTIONS          
-#define TFT_MISO_READ                 
+#define CGRAM_OFFSET                  // Entfernt unteren Störbalken
+#define SUPPORT_TRANSACTIONS          // Für LVGL-Kompatibilität
+#define TFT_MISO_READ                 // Aktiviert Rücklesen
 #define TFT_RGB_ORDER TFT_RGB
 
 // ── Font-Unterstützung ──────────────────────────────────
