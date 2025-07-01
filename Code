@@ -33,9 +33,9 @@ lv_disp_t* disp     = nullptr;
 static lv_indev_drv_t indev_drv;
 
 /* ----------  WLAN & API  ---------- */
-const char* ssid                         = "YourWifiName";
-const char* pwd                          = "YourWifiPW";
-const char* bitaxe_url                   = "http://YourBitaxeIP/api/system/info";
+const char* ssid                         = "FRITZ!Box 7590 KR";
+const char* pwd                          = "22117424911461612087";
+const char* bitaxe_url                   = "http://192.168.178.64/api/system/info";
 const char* coinbase_price_url           = "https://api.coinbase.com/v2/prices/spot?currency=USD";
 const char* blockchain_difficulty_url    = "https://blockchain.info/q/getdifficulty";
 const char* blockchain_hashrate_url      = "https://blockchain.info/q/hashrate";
@@ -1095,7 +1095,8 @@ void update_bitaxe_data()
             char hashrate_str[10];
             char temp_str[10];
             char power_str[10];
-            snprintf(hashrate_str, sizeof(hashrate_str), "1.%02d", (int)(hashRate * 100) % 100);
+            // Korrigierte Formatierung der Hashrate
+            snprintf(hashrate_str, sizeof(hashrate_str), "%d.%02d", (int)hashRate, (int)(hashRate * 100) % 100);
             snprintf(temp_str, sizeof(temp_str), "%.1f", temp);
             snprintf(power_str, sizeof(power_str), "%.1f", power);
 
@@ -1157,134 +1158,18 @@ void update_bitaxe_data()
                 lv_label_set_text(label_block_chance_screen3, label_block_chance_text.c_str());
             }
 
-            
-            int unlock_count = 0;
-            const int max_unlocks_per_cycle = 2;
-
-            
-            static unsigned long cool_runnings_start_time = 0;
-            const unsigned long cool_runnings_duration = 600000; 
-
             // Check for Hashrate-Achievements
-            if (hashRate >= achievements[1].target_value / 1000.0 && !achievements[1].unlocked && unlock_count < max_unlocks_per_cycle) {
+            if (hashRate >= achievements[1].target_value / 1000.0 && !achievements[1].unlocked) {
                 achievements[1].unlocked = true;
                 enqueue_achievement(achievements[1].name); // Every Hash Counts: Hashrate > 1.2 TH/s
-                unlock_count++;
             }
-            if (hashRate >= achievements[2].target_value / 1000.0 && !achievements[2].unlocked && unlock_count < max_unlocks_per_cycle) {
+            if (hashRate >= achievements[2].target_value / 1000.0 && !achievements[2].unlocked) {
                 achievements[2].unlocked = true;
                 enqueue_achievement(achievements[2].name); // Hash Hustler: Hashrate > 1.75 TH/s
-                unlock_count++;
             }
-            if (hashRate >= achievements[3].target_value / 1000.0 && !achievements[3].unlocked && unlock_count < max_unlocks_per_cycle) {
+            if (hashRate >= achievements[3].target_value / 1000.0 && !achievements[3].unlocked) {
                 achievements[3].unlocked = true;
                 enqueue_achievement(achievements[3].name); // Double Trouble: Hashrate > 2 TH/s
-                unlock_count++;
-            }
-
-            // Check für Temperatur-Achievements
-            if (temp >= achievements[0].target_value && !achievements[0].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[0].unlocked = true;
-                enqueue_achievement(achievements[0].name); // Burn Baby Burn: Temp > 65 degrees
-                unlock_count++;
-            }
-            if (temp >= achievements[13].target_value && !achievements[13].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[13].unlocked = true;
-                enqueue_achievement(achievements[13].name); // Rekt: Temp > 70 degrees (ohne Zeitbedingung)
-                unlock_count++;
-            }
-            // Check for Cool Runnings with Timer
-            if (temp < achievements[8].target_value && !achievements[8].unlocked) {
-                if (cool_runnings_start_time == 0) {
-                    cool_runnings_start_time = millis(); 
-                } else if (millis() - cool_runnings_start_time >= cool_runnings_duration && unlock_count < max_unlocks_per_cycle) {
-                    achievements[8].unlocked = true;
-                    enqueue_achievement(achievements[8].name); 
-                    unlock_count++;
-                    cool_runnings_start_time = 0; 
-                }
-            } else {
-                cool_runnings_start_time = 0; 
-            }
-
-            // Check for Shares-Achievements
-            if (sharesAccepted >= achievements[10].target_value && !achievements[10].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[10].unlocked = true;
-                enqueue_achievement(achievements[10].name); // Share Hoarder: 1,000,000 Shares
-                unlock_count++;
-            }
-            if (sharesAccepted >= achievements[11].target_value && !achievements[11].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[11].unlocked = true;
-                enqueue_achievement(achievements[11].name); // Diamond Hands: 5,000,000 Shares
-                unlock_count++;
-            }
-
-            // Check für Best Diff-Achievements
-            long long bestDiffValue = parse_diff(bestDiff); 
-            if (bestDiffValue >= achievements[4].target_value && !achievements[4].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[4].unlocked = true;
-                enqueue_achievement(achievements[4].name); // G-Club: Best Diff > 1G
-                unlock_count++;
-            }
-            if (bestDiffValue >= achievements[5].target_value && !achievements[5].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[5].unlocked = true;
-                enqueue_achievement(achievements[5].name); // Way to Go: Best Diff > 50G
-                unlock_count++;
-            }
-            if (bestDiffValue >= achievements[6].target_value && !achievements[6].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[6].unlocked = true;
-                enqueue_achievement(achievements[6].name); // Triple G Club: Best Diff > 100G
-                unlock_count++;
-            }
-            if (bestDiffValue >= achievements[7].target_value && !achievements[7].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[7].unlocked = true;
-                enqueue_achievement(achievements[7].name); // Sooo Close: Best Diff > 1T
-                unlock_count++;
-            }
-
-            
-            double bestDiffPercent = 0.0;
-            if (xSemaphoreTake(api_data_mutex, 10)) {
-                if (networkDifficulty > 0) {
-                    bestDiffPercent = bestDiffValue / networkDifficulty;
-                }
-                xSemaphoreGive(api_data_mutex);
-            }
-            if (bestDiffPercent >= achievements[9].target_value && !achievements[9].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[9].unlocked = true;
-                enqueue_achievement(achievements[9].name); // Block Dreamer: Best Diff > 50% of network difficulty
-                unlock_count++;
-            }
-            if (bestDiffPercent >= achievements[12].target_value && !achievements[12].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[12].unlocked = true;
-                enqueue_achievement(achievements[12].name); // Wen Lambo?: Best Diff > 75% of network difficulty
-                unlock_count++;
-            }
-
-            // Check for Uptime-Achievements
-            int64_t current_time = esp_timer_get_time(); 
-            prefs.begin("uptime", true); 
-            int64_t saved_start_time = prefs.getLong64("start_time", 0); 
-            prefs.end();
-            int64_t uptime_microseconds = current_time - saved_start_time; 
-            double uptime_seconds = uptime_microseconds / 1000000.0; 
-
-            // Check for Solid Signal (1 week Uptime)
-            if (uptime_seconds >= achievements[14].target_value && !achievements[14].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[14].unlocked = true;
-                enqueue_achievement(achievements[14].name); // Solid Signal: 1 Week Uptime
-                unlock_count++;
-            }
-            // Check for Timeless Tracker (2 Months Uptime)
-            if (uptime_seconds >= achievements[15].target_value && !achievements[15].unlocked && unlock_count < max_unlocks_per_cycle) {
-                achievements[15].unlocked = true;
-                enqueue_achievement(achievements[15].name); // Timeless Tracker: 2 Months Uptime
-                unlock_count++;
-            }
-
-            // Speichere Achievements in NVS, wenn eines freigeschaltet wurde
-            if (unlock_count > 0) {
-                save_achievements();
             }
         }
     } else {
@@ -1297,6 +1182,7 @@ void update_bitaxe_data()
     }
     http.end();
 }
+
 
 
 /********************************************************************
@@ -1413,4 +1299,3 @@ void loop() {
 
     delay(5);
 }
-
