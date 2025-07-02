@@ -33,9 +33,9 @@ lv_disp_t* disp     = nullptr;
 static lv_indev_drv_t indev_drv;
 
 /* ----------  WLAN & API  ---------- */
-const char* ssid                         = "FRITZ!Box 7590 KR";
-const char* pwd                          = "22117424911461612087";
-const char* bitaxe_url                   = "http://192.168.178.64/api/system/info";
+const char* ssid                         = "YourWifiName";
+const char* pwd                          = "YourWifiPW";
+const char* bitaxe_url                   = "http://YourBitaxeIp/api/system/info";
 const char* coinbase_price_url           = "https://api.coinbase.com/v2/prices/spot?currency=USD";
 const char* blockchain_difficulty_url    = "https://blockchain.info/q/getdifficulty";
 const char* blockchain_hashrate_url      = "https://blockchain.info/q/hashrate";
