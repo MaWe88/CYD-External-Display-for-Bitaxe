@@ -1,6 +1,8 @@
 #ifndef LV_USE_GESTURE
 #  define LV_USE_GESTURE 1
 #endif
+#include <FS.h>
+using fs::FS; 
 
 #include <lvgl.h>
 #include <TFT_eSPI.h>
@@ -15,6 +17,7 @@
 #include "background3.h"    
 #include "backgroundachieve.h" 
 #include "achievementpopup.h" 
+#include <WiFiManager.h> 
 
 
 /* ----------  Touch-Pins  ---------- */
@@ -33,12 +36,17 @@ lv_disp_t* disp     = nullptr;
 static lv_indev_drv_t indev_drv;
 
 /* ----------  WLAN & API  ---------- */
-const char* ssid                         = "YourWifiName";
-const char* pwd                          = "YourWifiPW";
-const char* bitaxe_url                   = "http://YourBitaxeIp/api/system/info";
+// WiFi and API configuration with placeholder values
+const char* ssid                         = "YOUR_WIFI_SSID"; 
+const char* pwd                          = "YOUR_WIFI_PASSWORD"; 
+const char* bitaxe_url                   = "http://YOUR_BITAXE_IP/api/system/info"; 
 const char* coinbase_price_url           = "https://api.coinbase.com/v2/prices/spot?currency=USD";
 const char* blockchain_difficulty_url    = "https://blockchain.info/q/getdifficulty";
 const char* blockchain_hashrate_url      = "https://blockchain.info/q/hashrate";
+// Custom parameter for WiFiManager to store Bitaxe URL
+char custom_bitaxe_url[100] = "http://YOUR_BITAXE_IP/api/system/info"; 
+// Custom parameter for display rotation
+char custom_display_rotation[2] = "2"; // Default rotation value (0-3)
 
 /* ----------  UI-Objects (Site-1)  ---------- */
 lv_obj_t* label_status;
@@ -336,6 +344,20 @@ void create_ui()
     lv_obj_set_style_text_color(label_block_chance, lv_color_hex(0xF7931A), LV_PART_MAIN);
     lv_obj_set_style_text_font(label_block_chance, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_label_set_text(label_block_chance, "Blk/Yr: --");
+
+  
+lv_obj_t* reset_area_screen1 = lv_obj_create(screen1);
+lv_obj_set_pos(reset_area_screen1, 0, 0);
+lv_obj_set_size(reset_area_screen1, 320, 240);
+lv_obj_set_style_bg_opa(reset_area_screen1, LV_OPA_0, LV_PART_MAIN); 
+lv_obj_set_style_border_width(reset_area_screen1, 0, LV_PART_MAIN); 
+lv_obj_set_style_bg_color(reset_area_screen1, lv_color_hex(0x000000), LV_PART_MAIN); 
+lv_obj_add_flag(reset_area_screen1, LV_OBJ_FLAG_CLICKABLE);
+lv_obj_add_event_cb(reset_area_screen1, long_press_reset_handler, LV_EVENT_ALL, NULL);
+lv_obj_move_background(reset_area_screen1); 
+
+
+
 }
 
 /********************************************************************
@@ -392,6 +414,19 @@ void create_screen2()
     lv_obj_set_style_text_font(label_session_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_label_set_text(label_session_screen2, "SESSION: --");
     lv_obj_add_flag(label_session_screen2, LV_OBJ_FLAG_HIDDEN); 
+
+  
+lv_obj_t* reset_area_screen2 = lv_obj_create(screen2);
+lv_obj_set_pos(reset_area_screen2, 0, 0);
+lv_obj_set_size(reset_area_screen2, 320, 240); 
+lv_obj_set_style_bg_opa(reset_area_screen2, LV_OPA_0, LV_PART_MAIN); 
+lv_obj_set_style_border_width(reset_area_screen2, 0, LV_PART_MAIN); 
+lv_obj_set_style_bg_color(reset_area_screen2, lv_color_hex(0x000000), LV_PART_MAIN); 
+lv_obj_add_flag(reset_area_screen2, LV_OBJ_FLAG_CLICKABLE);
+lv_obj_add_event_cb(reset_area_screen2, long_press_reset_handler, LV_EVENT_ALL, NULL);
+lv_obj_move_background(reset_area_screen2); 
+
+
 }
 
 /********************************************************************
@@ -495,6 +530,18 @@ void create_screen3()
     lv_obj_set_style_bg_opa(label_status_screen3, LV_OPA_0, LV_PART_MAIN); 
     lv_obj_set_style_pad_all(label_status_screen3, 2, LV_PART_MAIN);
     lv_label_set_text(label_status_screen3, "");
+
+ 
+lv_obj_t* reset_area_screen3 = lv_obj_create(screen3);
+lv_obj_set_pos(reset_area_screen3, 0, 0);
+lv_obj_set_size(reset_area_screen3, 320, 240); 
+lv_obj_set_style_bg_opa(reset_area_screen3, LV_OPA_0, LV_PART_MAIN); 
+lv_obj_set_style_border_width(reset_area_screen3, 0, LV_PART_MAIN); 
+lv_obj_set_style_bg_color(reset_area_screen3, lv_color_hex(0x000000), LV_PART_MAIN); 
+lv_obj_add_flag(reset_area_screen3, LV_OBJ_FLAG_CLICKABLE);
+lv_obj_add_event_cb(reset_area_screen3, long_press_reset_handler, LV_EVENT_ALL, NULL);
+lv_obj_move_background(reset_area_screen3); 
+
 }
 
 /********************************************************************
@@ -660,6 +707,80 @@ void create_screen_achievements()
     lv_obj_add_flag(label_achievement_16, LV_OBJ_FLAG_CLICKABLE); 
     lv_obj_add_event_cb(label_achievement_16, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)15);
 }
+
+
+
+void show_wifi_instructions() {
+    
+    lv_obj_clean(lv_scr_act());
+    
+    
+    lv_obj_t* wifi_overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(wifi_overlay, 320, 240); 
+    lv_obj_align(wifi_overlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(wifi_overlay, lv_color_hex(0x000000), LV_PART_MAIN); 
+    lv_obj_set_style_bg_opa(wifi_overlay, LV_OPA_100, LV_PART_MAIN); 
+    lv_obj_set_style_border_width(wifi_overlay, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(wifi_overlay, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(wifi_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    
+    lv_obj_t* title = lv_label_create(wifi_overlay);
+    lv_obj_set_pos(title, 10, 10);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFF00), LV_PART_MAIN); // Yellow text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(title, "WiFi Setup Required");
+
+    // Instructions text
+    lv_obj_t* instructions = lv_label_create(wifi_overlay);
+    lv_obj_set_pos(instructions, 10, 40);
+    lv_obj_set_style_text_color(instructions, lv_color_hex(0xFFFFFF), LV_PART_MAIN); // White text
+    lv_obj_set_style_text_font(instructions, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_width(instructions, 300); 
+    lv_label_set_long_mode(instructions, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(instructions, 
+        "1. Connect to WiFi 'BitaxeMonitorAP'\n"
+        "   Password: password\n"
+        "2. Open browser, go to 192.168.4.1\n"
+        "3. Enter your WiFi details & Bitaxe URL\n"
+        "4. Save to connect. Device will restart.");
+
+    
+    lv_obj_t* hint = lv_label_create(wifi_overlay);
+    lv_obj_set_pos(hint, 10, 200);
+    lv_obj_set_style_text_color(hint, lv_color_hex(0x808080), LV_PART_MAIN); 
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(hint, "Waiting for configuration...");
+
+    
+    lv_obj_invalidate(lv_scr_act());
+    lv_refr_now(disp);
+}
+// Function to handle long press for WiFi reset (10 seconds)
+void long_press_reset_handler(lv_event_t* e) {
+    static int long_press_duration = 0;
+    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT) {
+        long_press_duration += 750; 
+        Serial.print("Long press duration: ");
+        Serial.println(long_press_duration);
+        if (long_press_duration >= 10000) { 
+            Serial.println("Long press detected (10s), resetting WiFi settings...");
+            WiFi.disconnect(true); 
+            
+            WiFiManager wm;
+            wm.resetSettings(); 
+            Serial.println("WiFiManager settings reset complete.");
+            delay(1000);
+            ESP.restart(); 
+        }
+    } else if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+        long_press_duration = 0; 
+        Serial.println("Touch released, resetting long press duration");
+    }
+}
+
+
+
 
 /********************************************************************
  *  Achievement Queue und Popup
@@ -1378,18 +1499,87 @@ void setup() {
     }
     Serial.println("Uptime tracking initialized");
 
-    
-    WiFi.begin(ssid, pwd);
-    lv_label_set_text(label_status, "CONNECTING WIFI...");
-    lv_obj_set_style_text_color(label_status, lv_color_hex(0xFFFF00), LV_PART_MAIN);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(300);
-        lv_timer_handler();
-    }
+// Initialize WiFiManager
+WiFiManager wm;
 
-    lv_label_set_text(label_status, "LOADING DATA...");
-    lv_obj_set_style_text_color(label_status, lv_color_hex(0x00FF00), LV_PART_MAIN);
-    lv_timer_handler();
+// Enable debug output for WiFiManager to track issues
+wm.setDebugOutput(true);
+
+// Define custom parameters for Bitaxe URL and display rotation in the configuration portal
+WiFiManagerParameter custom_bitaxe("bitaxe_url", "Bitaxe URL", custom_bitaxe_url, 100);
+WiFiManagerParameter custom_rot("rotation", "Display Rotation (0-3)", custom_display_rotation, 2);
+
+// Add custom parameters to WiFiManager
+wm.addParameter(&custom_bitaxe);
+wm.addParameter(&custom_rot);
+
+// Set callback to save custom parameters to NVS
+wm.setSaveConfigCallback([&custom_bitaxe, &custom_rot]() {
+    Serial.println("Saving custom configuration...");
+    Preferences prefs;
+    prefs.begin("config", false); // Open Preferences in read-write mode
+    prefs.putString("bitaxe_url", custom_bitaxe.getValue());
+    prefs.putInt("rotation", atoi(custom_rot.getValue()));
+    prefs.end();
+    Serial.println("Custom configuration saved to NVS");
+});
+
+// Set a longer timeout for the configuration portal (in seconds)
+wm.setConfigPortalTimeout(300); // Increased to 5 minutes to ensure users have enough time
+
+
+// Show WiFi instructions on the display when starting the configuration portal
+Serial.println("Starting WiFiManager AutoConnect...");
+show_wifi_instructions(); // Display instructions on the ESP32 screen
+
+// Try to connect to WiFi or start configuration portal if connection fails
+if (!wm.autoConnect("BitaxeMonitorAP", "password")) {
+    Serial.println("Failed to connect and hit timeout, restarting ESP32...");
+    ESP.restart(); // Restart ESP32 if connection fails after timeout
+} else {
+    Serial.println("WiFi connected successfully!");
+    // Clean the screen completely and recreate the UI
+    lv_obj_clean(lv_scr_act()); // Remove all objects including the instructions overlay
+    create_ui(); // Recreate the main UI
+    create_screen2(); // Recreate screen 2
+    create_screen3(); // Recreate screen 3
+    create_screen_achievements(); // Recreate achievements screen
+    lv_scr_load(screen1); // Load the first screen
+    lv_obj_invalidate(lv_scr_act()); // Invalidate to force redraw
+    lv_refr_now(disp); // Force immediate refresh
+}
+
+// Load saved custom parameters after connection
+Preferences prefs;
+prefs.begin("config", true); // Open Preferences in read-only mode
+String saved_bitaxe_url = prefs.getString("bitaxe_url", "http://YOUR_BITAXE_IP/api/system/info");
+int saved_rotation = prefs.getInt("rotation", 2); // Default to 2 if not set
+prefs.end();
+
+// Update global variables with saved values
+strncpy(custom_bitaxe_url, saved_bitaxe_url.c_str(), sizeof(custom_bitaxe_url) - 1);
+custom_bitaxe_url[sizeof(custom_bitaxe_url) - 1] = '\0'; // Ensure null termination
+bitaxe_url = custom_bitaxe_url; // Update the global bitaxe_url pointer with the saved value
+
+// Apply saved display rotation and corresponding touch rotation
+tft.setRotation(saved_rotation);
+// Define a mapping for touch rotation based on display rotation
+// This mapping can be adjusted based on user feedback
+int touch_rotation;
+switch (saved_rotation) {
+    case 0: touch_rotation = 3; break; // Example mapping, adjust based on feedback
+    case 1: touch_rotation = 0; break;
+    case 2: touch_rotation = 1; break; // Matches your setup (display 2 -> touch 1)
+    case 3: touch_rotation = 2; break;
+    default: touch_rotation = 1; // Fallback to your default
+}
+touchscreen.setRotation(touch_rotation);
+Serial.print("Applied display rotation: ");
+Serial.println(saved_rotation);
+Serial.print("Applied touch rotation: ");
+Serial.println(touch_rotation);
+
+
 
     
     xTaskCreatePinnedToCore(api_task, "API_Task", 8192, NULL, 1, NULL, 0);
