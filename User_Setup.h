@@ -45,6 +45,7 @@
 // ── LVGL-spezifische Einstellungen ──────────────────────
 #define TFT_DISPOFF 0x28
 #define TFT_SLPIN   0x10
-
+// #define TFT_RGB_ORDER TFT_RGB  // Colour order Red-Green-Blue
+// #define TFT_RGB_ORDER TFT_BGR  // Colour order Blue-Green-Red
 
 #endif
