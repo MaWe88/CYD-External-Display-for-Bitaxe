@@ -1505,28 +1505,40 @@ WiFiManager wm;
 // Enable debug output for WiFiManager to track issues
 wm.setDebugOutput(true);
 
-// Define custom parameters for Bitaxe URL and display rotation in the configuration portal
-WiFiManagerParameter custom_bitaxe("bitaxe_url", "Bitaxe URL", custom_bitaxe_url, 100);
-WiFiManagerParameter custom_rot("rotation", "Display Rotation (0-3)", custom_display_rotation, 2);
+// HTML for Input Field for Bitaxe IP Address
+String html = R"(
+  <br/>
+  <label for='bitaxe_ip'>Bitaxe IP Address</label>
+  <input type='text' name='bitaxe_ip' id='bitaxe_ip' value='' placeholder='IP (e.g., 192.168.1.100)' size='40'>
+  <br/>
+  <label for='rotation'>Display Rotation (0-3)</label>
+  <input type='text' name='rotation' id='rotation' value='2' size='2'>
+)";
+
+WiFiManagerParameter custom_html_param(html.c_str());
 
 // Add custom parameters to WiFiManager
-wm.addParameter(&custom_bitaxe);
-wm.addParameter(&custom_rot);
+wm.addParameter(&custom_html_param);
 
 // Set callback to save custom parameters to NVS
-wm.setSaveConfigCallback([&custom_bitaxe, &custom_rot]() {
-    Serial.println("Saving custom configuration...");
-    Preferences prefs;
-    prefs.begin("config", false); // Open Preferences in read-write mode
-    prefs.putString("bitaxe_url", custom_bitaxe.getValue());
-    prefs.putInt("rotation", atoi(custom_rot.getValue()));
-    prefs.end();
-    Serial.println("Custom configuration saved to NVS");
+wm.setSaveConfigCallback([&wm]() {
+  Serial.println("Saving custom configuration...");
+  Preferences prefs;
+  prefs.begin("config", false); // Open Preferences in read-write mode
+  String bitaxe_ip = wm.server->arg("bitaxe_ip");
+  String bitaxe_url_full = "";
+  if (bitaxe_ip != "") {
+    bitaxe_url_full = "http://" + bitaxe_ip + "/api/system/info";
+  }
+  String rotationValue = wm.server->arg("rotation");
+  prefs.putString("bitaxe_url", bitaxe_url_full);
+  prefs.putInt("rotation", atoi(rotationValue.c_str()));
+  prefs.end();
+  Serial.println("Custom configuration saved to NVS");
 });
 
 // Set a longer timeout for the configuration portal (in seconds)
 wm.setConfigPortalTimeout(300); // Increased to 5 minutes to ensure users have enough time
-
 
 // Show WiFi instructions on the display when starting the configuration portal
 Serial.println("Starting WiFiManager AutoConnect...");
@@ -1534,23 +1546,22 @@ show_wifi_instructions(); // Display instructions on the ESP32 screen
 
 // Try to connect to WiFi or start configuration portal if connection fails
 if (!wm.autoConnect("BitaxeMonitorAP", "password")) {
-    Serial.println("Failed to connect and hit timeout, restarting ESP32...");
-    ESP.restart(); // Restart ESP32 if connection fails after timeout
+  Serial.println("Failed to connect and hit timeout, restarting ESP32...");
+  ESP.restart(); // Restart ESP32 if connection fails after timeout
 } else {
-    Serial.println("WiFi connected successfully!");
-    // Clean the screen completely and recreate the UI
-    lv_obj_clean(lv_scr_act()); // Remove all objects including the instructions overlay
-    create_ui(); // Recreate the main UI
-    create_screen2(); // Recreate screen 2
-    create_screen3(); // Recreate screen 3
-    create_screen_achievements(); // Recreate achievements screen
-    lv_scr_load(screen1); // Load the first screen
-    lv_obj_invalidate(lv_scr_act()); // Invalidate to force redraw
-    lv_refr_now(disp); // Force immediate refresh
+  Serial.println("WiFi connected successfully!");
+  // Clean the screen completely and recreate the UI
+  lv_obj_clean(lv_scr_act()); // Remove all objects including the instructions overlay
+  create_ui(); // Recreate the main UI
+  create_screen2(); // Recreate screen 2
+  create_screen3(); // Recreate screen 3
+  create_screen_achievements(); // Recreate achievements screen
+  lv_scr_load(screen1); // Load the first screen
+  lv_obj_invalidate(lv_scr_act()); // Invalidate to force redraw
+  lv_refr_now(disp); // Force immediate refresh
 }
 
 // Load saved custom parameters after connection
-Preferences prefs;
 prefs.begin("config", true); // Open Preferences in read-only mode
 String saved_bitaxe_url = prefs.getString("bitaxe_url", "http://YOUR_BITAXE_IP/api/system/info");
 int saved_rotation = prefs.getInt("rotation", 2); // Default to 2 if not set
@@ -1567,18 +1578,17 @@ tft.setRotation(saved_rotation);
 // This mapping can be adjusted based on user feedback
 int touch_rotation;
 switch (saved_rotation) {
-    case 0: touch_rotation = 3; break; // Example mapping, adjust based on feedback
-    case 1: touch_rotation = 0; break;
-    case 2: touch_rotation = 1; break; // Matches your setup (display 2 -> touch 1)
-    case 3: touch_rotation = 2; break;
-    default: touch_rotation = 1; // Fallback to your default
+  case 0: touch_rotation = 3; break; // Example mapping, adjust based on feedback
+  case 1: touch_rotation = 0; break;
+  case 2: touch_rotation = 1; break; // Matches your setup (display 2 -> touch 1)
+  case 3: touch_rotation = 2; break;
+  default: touch_rotation = 1; // Fallback to your default
 }
 touchscreen.setRotation(touch_rotation);
 Serial.print("Applied display rotation: ");
 Serial.println(saved_rotation);
 Serial.print("Applied touch rotation: ");
 Serial.println(touch_rotation);
-
 
 
     
