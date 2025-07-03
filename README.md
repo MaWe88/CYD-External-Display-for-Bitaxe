@@ -12,6 +12,7 @@ This version introduces user-friendly features for setup and customization:
 - **Display Rotation**: Adjust the screen rotation (0-3); 2 is the standard rotation for USB port on the right.
 - **Reset Function**: Reset all settings by long-pressing (10 seconds) anywhere on Layouts 1, 2, or 3 to return to the configuration portal.
 - **Precompiled Firmware**: Download a single `.bin` file to flash the project easily using a web-based tool—no Arduino IDE required.
+- **Multi Device Support**: `Bitaxe_Monitor_Multi_Device.bin` let you add up to 5 Bitaxe devices. Every 30sec the Display changes to the next Bitaxe.
 
 ---
 
@@ -70,14 +71,14 @@ Before starting, ensure you have:
 This is the easiest way to get started. Flash the firmware directly to your ESP32 using a web-based tool without installing any software.
 
 ### Step 1: Download the Firmware
-- Download the precompiled firmware file `Bitaxe_Monitor_Web.bin` 
+- Download the precompiled firmware file `Bitaxe_Monitor_Web.bin` or `Bitaxe_Monitor_Multi_Device.bin`
 
 ### Step 2: Flash the Firmware Using ESP Web Tools
 1. Connect your CYD 2432S028R board to your computer via USB.
 2. Open Chrome, Edge, or Opera and visit the website: https://web.esphome.io/
 3. Click on "Connect" and select the COM port of your ESP32. (Check the Device Manager. If needed, install the CP210x driver.)
 4. Click "Install".
-5. Click "Choose File" and upload `Bitaxe_Monitor_Web.bin`. Now click Install.
+5. Click "Choose File" and upload `Bitaxe_Monitor_Web.bin` / `Bitaxe_Monitor_Multi_Device.bin`. Now click Install.
 6. On the backside of your CYD are 2 buttons on the left side of the ESP32 Chip (BOOT & RST). Hold `Boot` (after pressing Install), click `RST`, and release `Boot`.
 7. Wait until the flashing is complete.
 
@@ -88,7 +89,8 @@ This is the easiest way to get started. Flash the firmware directly to your ESP3
 4. Enter the following settings:
    - **WiFi SSID**: Your Wi-Fi network name.
    - **WiFi Password**: Your Wi-Fi password.
-   - **Bitaxe URL**: The IP address of your Bitaxe device (e.g., `http://192.168.1.100/api/system/info`).
+   - **Multi Device**: If you chose the Multi Device File, choose how many Bitaxe you want to cover. (upto 5)
+   - **Bitaxe URL**: The IP address of your Bitaxe device (e.g., `192.168.1.100`).
    - **Display Rotation (0-3)**: Standard is Rotation 2. Only change if your display looks scrambled or you want to place your display differently (e.g., 2 for USB right, 0 for USB left).
 5. Click "Save". The ESP32 will restart and connect to your Wi-Fi network using the provided settings.
 
@@ -178,6 +180,10 @@ If you experience incorrect colors on your display (e.g., blue instead of red/or
    - Save the file, recompile your sketch in the Arduino IDE, and upload it to your ESP32 board.
 5. **Test the Display**:
    - Check if the colors are now displayed correctly. If not, try the other setting.
+
+---
+## Bugs
+   - Some Achievements possibly bugged for `Bitaxe_Monitor_Multi_Device`
 
 **Note**: This is an advanced configuration step and requires recompiling the firmware. It is recommended for users familiar with Arduino programming.
 
