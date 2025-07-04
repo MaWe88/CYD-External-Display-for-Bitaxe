@@ -47,6 +47,11 @@ const char* blockchain_hashrate_url      = "https://blockchain.info/q/hashrate";
 char custom_bitaxe_url[100] = "http://YOUR_BITAXE_IP/api/system/info"; 
 // Custom parameter for display rotation
 char custom_display_rotation[2] = "2"; // Default rotation value (0-3)
+// Variables for tracking touch activity and display state
+unsigned long lastTouchTime = 0;
+bool displayOn = true;
+unsigned long DISPLAY_TIMEOUT_MS = 0; // Will be set based on user selection
+
 
 /* ----------  UI-Objects (Site-1)  ---------- */
 lv_obj_t* label_status;
@@ -1505,7 +1510,7 @@ WiFiManager wm;
 // Enable debug output for WiFiManager to track issues
 wm.setDebugOutput(true);
 
-// HTML for Input Field for Bitaxe IP Address
+// HTML for Input Field for Bitaxe IP Address, LED Control, and Display Timeout
 String html = R"(
   <br/>
   <label for='bitaxe_ip'>Bitaxe IP Address</label>
@@ -1513,12 +1518,32 @@ String html = R"(
   <br/>
   <label for='rotation'>Display Rotation (0-3)</label>
   <input type='text' name='rotation' id='rotation' value='2' size='2'>
+  <br/>
+  <label for='led_off'>Turn Off Status LED</label>
+  <select name='led_off' id='led_off'>
+    <option value='0'>No</option>
+    <option value='1'>Yes</option>
+  </select>
+  <br/>
+  <label for='display_timeout'>Display Timeout</label>
+  <select name='display_timeout' id='display_timeout'>
+    <option value='0'>Never</option>
+    <option value='1'>After 1 min</option>
+    <option value='5'>After 5 min</option>
+    <option value='30'>After 30 min</option>
+  </select>
 )";
 
 WiFiManagerParameter custom_html_param(html.c_str());
 
 // Add custom parameters to WiFiManager
 wm.addParameter(&custom_html_param);
+
+// Define the pins for the RGB Status LED (based on user testing)
+#define STATUS_LED_RED_PIN 4
+#define STATUS_LED_GREEN_PIN 16
+#define STATUS_LED_BLUE_PIN 17
+
 
 // Set callback to save custom parameters to NVS
 wm.setSaveConfigCallback([&wm]() {
@@ -1531,8 +1556,12 @@ wm.setSaveConfigCallback([&wm]() {
     bitaxe_url_full = "http://" + bitaxe_ip + "/api/system/info";
   }
   String rotationValue = wm.server->arg("rotation");
+  String ledOffValue = wm.server->arg("led_off");
+  String displayTimeoutValue = wm.server->arg("display_timeout");
   prefs.putString("bitaxe_url", bitaxe_url_full);
   prefs.putInt("rotation", atoi(rotationValue.c_str()));
+  prefs.putBool("led_off", ledOffValue == "1");
+  prefs.putInt("disp_timeout", atoi(displayTimeoutValue.c_str()));
   prefs.end();
   Serial.println("Custom configuration saved to NVS");
 });
@@ -1565,6 +1594,8 @@ if (!wm.autoConnect("BitaxeMonitorAP", "password")) {
 prefs.begin("config", true); // Open Preferences in read-only mode
 String saved_bitaxe_url = prefs.getString("bitaxe_url", "http://YOUR_BITAXE_IP/api/system/info");
 int saved_rotation = prefs.getInt("rotation", 2); // Default to 2 if not set
+bool led_off = prefs.getBool("led_off", false); // Default to false (LED on)
+int display_timeout_min = prefs.getInt("disp_timeout", 0); // Default to 0 (Never)
 prefs.end();
 
 // Update global variables with saved values
@@ -1590,6 +1621,45 @@ Serial.println(saved_rotation);
 Serial.print("Applied touch rotation: ");
 Serial.println(touch_rotation);
 
+// Initialize and apply RGB LED setting
+pinMode(STATUS_LED_RED_PIN, OUTPUT);
+pinMode(STATUS_LED_GREEN_PIN, OUTPUT);
+pinMode(STATUS_LED_BLUE_PIN, OUTPUT);
+if (led_off) {
+  digitalWrite(STATUS_LED_RED_PIN, HIGH); // Turn off red (assuming active LOW)
+  digitalWrite(STATUS_LED_GREEN_PIN, HIGH); // Turn off green (assuming active LOW)
+  digitalWrite(STATUS_LED_BLUE_PIN, HIGH); // Turn off blue (assuming active LOW)
+  Serial.println("Status LED turned off (all colors set to HIGH).");
+} else {
+  digitalWrite(STATUS_LED_RED_PIN, LOW); // Turn on red (assuming active LOW)
+  digitalWrite(STATUS_LED_GREEN_PIN, LOW); // Turn on green (assuming active LOW)
+  digitalWrite(STATUS_LED_BLUE_PIN, LOW); // Turn on blue (assuming active LOW)
+  Serial.println("Status LED is on (all colors set to LOW).");
+}
+
+// Initialize backlight pin and display timeout settings
+#define BACKLIGHT_PIN 21
+pinMode(BACKLIGHT_PIN, OUTPUT);
+digitalWrite(BACKLIGHT_PIN, HIGH); // Assuming active HIGH for backlight ON
+lastTouchTime = millis(); // Initialize last touch time to current time
+displayOn = true; // Ensure display starts in ON state
+Serial.println("Display initialized to ON state");
+
+
+
+// Set the display timeout in milliseconds based on user selection
+if (display_timeout_min == 0) {
+  DISPLAY_TIMEOUT_MS = 0; // Never
+} else if (display_timeout_min == 1) {
+  DISPLAY_TIMEOUT_MS = 60000; // 1 minute
+} else if (display_timeout_min == 5) {
+  DISPLAY_TIMEOUT_MS = 300000; // 5 minutes
+} else if (display_timeout_min == 30) {
+  DISPLAY_TIMEOUT_MS = 1800000; // 30 minutes
+}
+
+lastTouchTime = millis();
+displayOn = true;
 
     
     xTaskCreatePinnedToCore(api_task, "API_Task", 8192, NULL, 1, NULL, 0);
@@ -1603,13 +1673,31 @@ Serial.println(touch_rotation);
  *  Loop
  *******************************************************************/
 void loop() {
-    static uint32_t last_ms = millis();
-    uint32_t now_ms = millis();
-    lv_tick_inc(now_ms - last_ms);   
-    last_ms = now_ms;
+  static uint32_t last_ms = millis();
+  uint32_t now_ms = millis();
+  lv_tick_inc(now_ms - last_ms);
+  last_ms = now_ms;
 
-    lv_timer_handler();              
-    update_data();                   
+  // Check for touch to update last activity time and wake display
+  if (touchscreen.touched()) {
+    lastTouchTime = now_ms; // Update the last touch time on any touch
+    if (!displayOn) {
+      digitalWrite(BACKLIGHT_PIN, HIGH); // Turn backlight ON (assuming active HIGH)
+      displayOn = true;
+      Serial.println("Display turned ON by touch");
+    }
+  }
 
-    delay(5);
+  // Check for display timeout (only if timeout is not set to "Never")
+  if (displayOn && DISPLAY_TIMEOUT_MS > 0 && (now_ms - lastTouchTime) >= DISPLAY_TIMEOUT_MS) {
+    digitalWrite(BACKLIGHT_PIN, LOW); // Turn backlight OFF (assuming active HIGH)
+    displayOn = false;
+    Serial.println("Display turned OFF due to timeout");
+  }
+
+  lv_timer_handler();
+  update_data();
+
+  delay(5);
 }
+
