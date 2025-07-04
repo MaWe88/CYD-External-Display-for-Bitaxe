@@ -12,6 +12,7 @@ This version introduces user-friendly features for setup and customization:
 - **Display Rotation**: Adjust the screen rotation (0-3); 2 is the standard rotation for USB port on the right.
 - **Turnoff Status LED**: Option to turn off the Status Led at the back
 - **"Powersaving"** Mode: Option to turn off the Display after 1min / 5min / 30min / never
+- **Price Data for several mineable Coins**: Choose from BTC, BCH, DGB, XEC, NMC, PPC and LCC
 - **Reset Function**: Reset all settings by long-pressing (10 seconds) anywhere on Layouts 1, 2, or 3 to return to the configuration portal.
 - **Precompiled Firmware**: Download a single `.bin` file to flash the project easily using a web-based tool—no Arduino IDE required.
 - **Multi Device Support**: `Bitaxe_Monitor_Multi_Device.bin` let you add up to 5 Bitaxe devices. Every 30sec the Display changes to the next Bitaxe.
@@ -94,6 +95,9 @@ This is the easiest way to get started. Flash the firmware directly to your ESP3
    - **Multi Device**: If you chose the Multi Device File, choose how many Bitaxe you want to cover. (upto 5)
    - **Bitaxe URL**: The IP address of your Bitaxe device (e.g., `192.168.1.100`).
    - **Display Rotation (0-3)**: Standard is Rotation 2. Only change if your display looks scrambled or you want to place your display differently (e.g., 2 for USB right, 0 for USB left).
+   - **Powersaving**: Choose if you want your Display to turn off after some time (never is standard)
+   - **Status Led**: Choose if you want to turn it off or leave it on.
+   - **Price Data and Blk/Yr***: Choose from BTC, BCH, DGB, XEC, NMC, PPC or LCC 
 5. Click "Save". The ESP32 will restart and connect to your Wi-Fi network using the provided settings.
 
 ### Step 4: Reset Settings if Needed
@@ -191,6 +195,10 @@ If you experience incorrect colors on your display (e.g., blue instead of red/or
 
 ---
 
+***Note on Block Chance Calculations (`Blk/Yr`)**:  
+The `Blk/Yr` value represents an estimated probability of mining a block per year based on your device's hashrate compared to the network's total hashrate. For Bitcoin (BTC), this calculation uses real-time network data and is accurate. For other coins (BCH, XEC, DGB, NMC, PPC, LCC), the values are approximations based on static adjustment factors relative to Bitcoin's difficulty. These approximations may not reflect current network conditions and should be considered rough estimates. I am working on improving accuracy for non-BTC coins in future updates.
+
+---
 ## License
 
 This project is open for personal and educational use. If you redistribute or modify it, please credit the original author.
