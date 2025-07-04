@@ -115,7 +115,7 @@
 /*====================
    FONTS - OPTIMIERT FÜR POKÉMON-TOOL
  *====================*/
-#define LV_FONT_MONTSERRAT_8  0
+#define LV_FONT_MONTSERRAT_8  1
 #define LV_FONT_MONTSERRAT_10 1      // FÜR KLEINE TEXTE
 #define LV_FONT_MONTSERRAT_12 1      // FÜR LISTEN
 #define LV_FONT_MONTSERRAT_14 1      // STANDARD
