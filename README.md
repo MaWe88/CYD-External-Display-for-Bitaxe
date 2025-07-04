@@ -11,7 +11,7 @@ This version introduces user-friendly features for setup and customization:
 - **WiFiManager for Easy Configuration**: Configure WiFi credentials, Bitaxe URL, and display rotation via a web portal without modifying the code.
 - **Display Rotation**: Adjust the screen rotation (0-3); 2 is the standard rotation for USB port on the right.
 - **Turnoff Status LED**: Option to turn off the Status Led at the back
-- **"Powersaving" Mode: Option to turn off the Display after 1min / 5min / 30min / never
+- **"Powersaving"** Mode: Option to turn off the Display after 1min / 5min / 30min / never
 - **Reset Function**: Reset all settings by long-pressing (10 seconds) anywhere on Layouts 1, 2, or 3 to return to the configuration portal.
 - **Precompiled Firmware**: Download a single `.bin` file to flash the project easily using a web-based tool—no Arduino IDE required.
 - **Multi Device Support**: `Bitaxe_Monitor_Multi_Device.bin` let you add up to 5 Bitaxe devices. Every 30sec the Display changes to the next Bitaxe.
