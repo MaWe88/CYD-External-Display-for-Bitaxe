@@ -1339,7 +1339,83 @@ void update_bitaxe_data() {
         lv_label_set_text(label_block_chance_screen3, label_block_chance_text.c_str());
       }
 
-      // Rest of the function for achievements and other updates can remain as is
+      // Überprüfung der Achievements
+if (hashRate > 0) {
+  achievements[1].current_value = hashRate * 1000; // Hashrate in GH/s für "Every Hash Counts"
+  achievements[2].current_value = hashRate * 1000; // Hashrate in GH/s für "Hash Hustler"
+  achievements[3].current_value = hashRate * 1000; // Hashrate in GH/s für "Double Trouble"
+  
+  if (!achievements[1].unlocked && achievements[1].current_value >= achievements[1].target_value) {
+    achievements[1].unlocked = true;
+    enqueue_achievement(achievements[1].name);
+  }
+  if (!achievements[2].unlocked && achievements[2].current_value >= achievements[2].target_value) {
+    achievements[2].unlocked = true;
+    enqueue_achievement(achievements[2].name);
+  }
+  if (!achievements[3].unlocked && achievements[3].current_value >= achievements[3].target_value) {
+    achievements[3].unlocked = true;
+    enqueue_achievement(achievements[3].name);
+  }
+}
+
+if (temp > 0) {
+  achievements[0].current_value = temp; // Temperatur für "Burn Baby Burn"
+  achievements[13].current_value = temp; // Temperatur für "Rekt"
+  
+  if (!achievements[0].unlocked && achievements[0].current_value >= achievements[0].target_value) {
+    achievements[0].unlocked = true;
+    enqueue_achievement(achievements[0].name);
+  }
+  if (!achievements[13].unlocked && achievements[13].current_value >= achievements[13].target_value) {
+    achievements[13].unlocked = true;
+    enqueue_achievement(achievements[13].name);
+  }
+}
+
+if (sharesAccepted > 0) {
+  achievements[10].current_value = sharesAccepted; // Shares für "Share Hoarder"
+  achievements[11].current_value = sharesAccepted; // Shares für "Diamond Hands"
+  
+  if (!achievements[10].unlocked && achievements[10].current_value >= achievements[10].target_value) {
+    achievements[10].unlocked = true;
+    enqueue_achievement(achievements[10].name);
+  }
+  if (!achievements[11].unlocked && achievements[11].current_value >= achievements[11].target_value) {
+    achievements[11].unlocked = true;
+    enqueue_achievement(achievements[11].name);
+  }
+}
+
+// Überprüfung für Best Difficulty (z. B. "G-Club", "Way to Go")
+long long bestDiffValue = parse_diff(bestDiff);
+if (bestDiffValue > 0) {
+  achievements[4].current_value = bestDiffValue; // Best Diff für "G-Club"
+  achievements[5].current_value = bestDiffValue; // Best Diff für "Way to Go"
+  achievements[6].current_value = bestDiffValue; // Best Diff für "Triple G Club"
+  achievements[7].current_value = bestDiffValue; // Best Diff für "Sooo Close"
+  
+  if (!achievements[4].unlocked && achievements[4].current_value >= achievements[4].target_value) {
+    achievements[4].unlocked = true;
+    enqueue_achievement(achievements[4].name);
+  }
+  if (!achievements[5].unlocked && achievements[5].current_value >= achievements[5].target_value) {
+    achievements[5].unlocked = true;
+    enqueue_achievement(achievements[5].name);
+  }
+  if (!achievements[6].unlocked && achievements[6].current_value >= achievements[6].target_value) {
+    achievements[6].unlocked = true;
+    enqueue_achievement(achievements[6].name);
+  }
+  if (!achievements[7].unlocked && achievements[7].current_value >= achievements[7].target_value) {
+    achievements[7].unlocked = true;
+    enqueue_achievement(achievements[7].name);
+  }
+}
+
+// Speichern der Achievements nach Änderungen
+save_achievements();
+
     }
   } else {
     lv_label_set_text(label_status, "HTTP ERROR");
