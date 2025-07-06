@@ -123,9 +123,7 @@ lv_obj_t* label_achievement_13;
 lv_obj_t* label_achievement_14;
 lv_obj_t* label_achievement_15;
 lv_obj_t* label_achievement_16;
-lv_obj_t* label_achievement_17;
-lv_obj_t* label_achievement_18;
-lv_obj_t* label_achievement_19;
+
 
 /* ----------  Achievement Queue  ---------- */
 #define MAX_ACHIEVEMENT_QUEUE 10
@@ -1372,6 +1370,25 @@ if (temp > 0) {
     enqueue_achievement(achievements[13].name);
   }
 }
+
+static unsigned long cool_runnings_start_time = 0;
+const unsigned long cool_runnings_duration = 600000; // 10 Minuten
+
+// In deiner update-Funktion, wo die Temperatur geprüft wird:
+if (temp < 50.0 && !achievements[8].unlocked) {
+    if (cool_runnings_start_time == 0) {
+        cool_runnings_start_time = millis();
+    }
+    if (millis() - cool_runnings_start_time >= cool_runnings_duration) {
+        achievements[8].unlocked = true;
+        enqueue_achievement(achievements[8].name);
+        cool_runnings_start_time = 0;
+    }
+} else {
+    cool_runnings_start_time = 0;
+}
+
+
 
 if (sharesAccepted > 0) {
   achievements[10].current_value = sharesAccepted; // Shares für "Share Hoarder"
