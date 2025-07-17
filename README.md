@@ -3,7 +3,13 @@
 Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your Bitcoin mining hardware (Bitaxe) on a CYD 2432S028R board using an ESP32 microcontroller. Follow this guide to set up and deploy the project with ease.
 
 ---
+## What's New in Version 3.0
 
+- **Only one file** for Single and Multi Device, with all new features from 2.1.
+- **Combined Hashrate** Option for displaying your total mining power from all devices. **Blockchance per Year** is also combined with that option
+
+  ---
+  
 ## What's New in Version 2.1
 
 ### WiFiManager and Custom Display Settings
@@ -72,17 +78,18 @@ Before starting, ensure you have:
 ## Option 1: Flash Precompiled Firmware (Recommended for Beginners)
 
 This is the easiest way to get started. Flash the firmware directly to your ESP32 using a web-based tool without installing any software.
-
+### Step 0: ONLY if your upgrading from an older Version than 3.0
+- download and install (see Step 2) the `reset_achievements.bin` file before upgrading, to clear your device NVS. Upgrading without could cause some bugs.
 ### Step 1: Download the Firmware
-- Download the precompiled firmware file `Bitaxe_Monitor_Web.bin` or `Bitaxe_Monitor_Multi_Device.bin`
+- Download the precompiled firmware file `Bitaxe_Monitor.bin` 
 
 ### Step 2: Flash the Firmware Using ESP Web Tools
 1. Connect your CYD 2432S028R board to your computer via USB.
 2. Open Chrome, Edge, or Opera and visit the website: https://web.esphome.io/
 3. Click on "Connect" and select the COM port of your ESP32. (Check the Device Manager. If needed, install the CP210x driver.)
 4. Click "Install".
-5. Click "Choose File" and upload `Bitaxe_Monitor_Web.bin` / `Bitaxe_Monitor_Multi_Device.bin`. Now click Install.
-6. On the backside of your CYD are 2 buttons on the left side of the ESP32 Chip (BOOT & RST). Hold `Boot` (after pressing Install), click `RST`, and release `Boot`.
+5. Click "Choose File" and upload `Bitaxe_Monitor.bin`. Now click Install.
+6. **Optional if your device doesnt install automaticly** On the backside of your CYD are 2 buttons on the left side of the ESP32 Chip (BOOT & RST). Hold `Boot` (after pressing Install), click `RST`, and release `Boot`.
 7. Wait until the flashing is complete.
 
 ### Step 3: Configure Settings via WiFiManager
@@ -92,12 +99,13 @@ This is the easiest way to get started. Flash the firmware directly to your ESP3
 4. Enter the following settings:
    - **WiFi SSID**: Your Wi-Fi network name.
    - **WiFi Password**: Your Wi-Fi password.
-   - **Multi Device**: If you chose the Multi Device File, choose how many Bitaxe you want to cover. (upto 5)
+   - **Multi Device**: Choose how many Bitaxe you want to cover. (upto 5)
    - **Bitaxe URL**: The IP address of your Bitaxe device (e.g., `192.168.1.100`).
    - **Display Rotation (0-3)**: Standard is Rotation 2. Only change if your display looks scrambled or you want to place your display differently (e.g., 2 for USB right, 0 for USB left).
    - **Powersaving**: Choose if you want your Display to turn off after some time (never is standard)
    - **Status Led**: Choose if you want to turn it off or leave it on.
-   - **Price Data and Blk/Yr***: Choose from BTC, BCH, DGB, XEC, NMC, PPC or LCC 
+   - **Price Data and Blk/Yr***: Choose from BTC, BCH, DGB, XEC, NMC, PPC or LCC
+   - **Combined Hashrate**: Option for displaying your total Mining Power
 5. Click "Save". The ESP32 will restart and connect to your Wi-Fi network using the provided settings.
 
 ### Step 4: Reset Settings if Needed
@@ -117,7 +125,7 @@ For those who prefer to compile the code themselves or make custom modifications
    - Under `Tools` > `Board` > `ESP32`, select `ESP32 Dev Module`.
    - Select the correct COM port.
    - Under `Tools`, configure:
-     - `PSRAM` to `Enabled`
+     - `PSRAM` to `disabled`
      - `Partition Scheme` to `Huge APP (3MB No OTA / 1MB SPIFFS)`
 
 ### Step 2: Install Required Libraries
@@ -163,7 +171,7 @@ Follow the same steps as in Option 1, Step 3 to configure WiFi, Bitaxe URL, and 
 | **No COM Port Visible**         | Check the Device Manager. If needed, install the CP210x driver.                                       |
 | **Performance/Memory Issues (Option 2)** | Set PSRAM to `Enabled` and Partition Scheme to `HUGE APP`.                                    |
 | **Display Issues**              | - **Rotated Display**: Adjust the „Display Rotation“ value (0-3) in the WiFiManager portal (`192.168.4.1`).<br>- **Incorrect Colors**: Refer to the „Advanced Configuration“ section below for instructions on adjusting color settings.<br>- **Access Portal**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset settings and reopen the portal. |
-
+| **crashes**                     | - make sure you install the `reset_achievements.bin` first before installing `Bitaxe_Monitor.bin` if your upgrading from 2.1, 2.0 and so on. 
 ---
 
 ## Advanced Configuration: Fixing Color Issues
@@ -189,14 +197,12 @@ If you experience incorrect colors on your display (e.g., blue instead of red/or
 
 ---
 ## Bugs
-   - Some Achievements possibly bugged for `Bitaxe_Monitor_Multi_Device`
-
-**Note**: This is an advanced configuration step and requires recompiling the firmware. It is recommended for users familiar with Arduino programming.
+   - possible Memory Leaks when tracking 4 or more Devices -> still doing stability tests
 
 ---
 
 ***Note on Block Chance Calculations (`Blk/Yr`)**:  
-The `Blk/Yr` value represents an estimated probability of mining a block per year based on your device's hashrate compared to the network's total hashrate. For Bitcoin (BTC), this calculation uses real-time network data and is accurate. For other coins (BCH, XEC, DGB, NMC, PPC, LCC), the values are approximations based on static adjustment factors relative to Bitcoin's difficulty. These approximations may not reflect current network conditions and should be considered rough estimates. I am working on improving accuracy for non-BTC coins in future updates.
+The `Blk/Yr` value represents an estimated probability of mining a block per year based on your device's hashrate compared to the network's total hashrate. For Bitcoin (BTC), this calculation uses real-time network data and is accurate. For other coins (BCH, XEC, DGB, NMC, PPC, LCC), the values are approximations based on Difficulty and Networkhashrate by July 16th. These approximations may not reflect current network conditions and should be considered rough estimates. I am working on improving accuracy for non-BTC coins in future updates.
 
 ---
 ## License
