@@ -1,62 +1,82 @@
 #ifndef LV_USE_GESTURE
 #define LV_USE_GESTURE 1
 #endif
-#include <FS.h>
-using fs::FS;
 
 #include <lvgl.h>
+#include <FS.h>
+using fs::FS;
 #include <TFT_eSPI.h>
+#include <esp_timer.h>
+#include <XPT2046_Touchscreen.h>
+#include <SPI.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include <SPI.h>
-#include <XPT2046_Touchscreen.h>
-#include "Background.h"
+#include <esp_timer.h>
+#include "background.h"
 #include "background2.h"
 #include "background3.h"
 #include "backgroundachieve.h"
 #include "achievementpopup.h"
-#include <WiFiManager.h>
 
-
-/* ----------  Touch-Pins  ---------- */
+/* ---------- Touch-Pins ---------- */
 #define XPT2046_IRQ 36
 #define XPT2046_MOSI 32
 #define XPT2046_MISO 39
 #define XPT2046_CLK 25
 #define XPT2046_CS 33
 
+void update_achievements_labels();
+void create_bitaxe_indicator(lv_obj_t* screen, int screenIndex);
+void update_bitaxe_data();
+void check_achievements();
+long long parse_diff(String diffStr);
+HTTPClient httpClient;
+
 SPIClass touchscreenSPI(VSPI);
 XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 
-/* ----------  Display / LVGL  ---------- */
+/* ---------- Display / LVGL ---------- */
 TFT_eSPI tft;
 lv_disp_t* disp = nullptr;
 static lv_indev_drv_t indev_drv;
 
-/* ----------  WLAN & API  ---------- */
-// WiFi and API configuration with placeholder values
-const char* ssid = "YOUR_WIFI_SSID";
-const char* pwd = "YOUR_WIFI_PASSWORD";
-const char* bitaxe_url = "http://YOUR_BITAXE_IP/api/system/info";
-//const char* coinbase_price_url           = "https://api.coinbase.com/v2/prices/spot?currency=USD";
+/* ---------- WLAN & API ---------- */
 const char* blockchain_difficulty_url = "https://blockchain.info/q/getdifficulty";
 const char* blockchain_hashrate_url = "https://blockchain.info/q/hashrate";
-// Custom parameter for WiFiManager to store Bitaxe URL
-char custom_bitaxe_url[100] = "http://YOUR_BITAXE_IP/api/system/info";
-// Custom parameter for display rotation
-char custom_display_rotation[2] = "2";  // Default rotation value (0-3)
-// Variables for tracking touch activity and display state
+
+char custom_display_rotation[2] = "2"; 
+
 unsigned long lastTouchTime = 0;
 bool displayOn = true;
-unsigned long DISPLAY_TIMEOUT_MS = 0;  // Will be set based on user selection
-// Global variable for selected coin
-String selected_coin = "BTC"; // Default to Bitcoin
+unsigned long DISPLAY_TIMEOUT_MS = 0; 
 
+String selected_coin = "BTC"; 
+String display_mode = "Solo";
 
+#define MAX_BITAXE_DEVICES 5
+int activeDevices = 0;
+int currentBitaxeIndex = 0;
+unsigned long lastSwitchTime = 0;
+const unsigned long switchInterval = 30000; 
 
-/* ----------  UI-Objects (Site-1)  ---------- */
+struct BitaxeData {
+  String url;
+  float hashRate;
+  int sharesAccepted;
+  int sharesRejected;
+  String bestDiff;
+  String sessionDiff;
+  float temp;
+  float power;
+  bool isConnected;
+  String name; 
+  unsigned long cool_runnings_start_time = 0; 
+};
+
+BitaxeData bitaxeDevices[MAX_BITAXE_DEVICES];
 lv_obj_t* label_status;
 lv_obj_t* label_hashrate;
 lv_obj_t* label_shares;
@@ -66,27 +86,22 @@ lv_obj_t* label_temp;
 lv_obj_t* label_block_chance;
 lv_obj_t* label_btc_price;
 lv_obj_t* label_network_diff;
+lv_obj_t* label_current_bitaxe[3]; 
 
-/* ----------  Screens  ---------- */
 lv_obj_t* screen1 = nullptr;
 lv_obj_t* screen2 = nullptr;
 lv_obj_t* screen3 = nullptr;
 bool on_screen2 = false;
 bool on_screen3 = false;
-
 lv_obj_t* screen_achievements = nullptr;
 bool on_screen_achievements = false;
 
-
-/* ----------  Shared Data  ---------- */
 double btc_price_usd = 0.0;
 double networkDifficulty = 1.269823e14;
 double networkHashrate = 876.51e18;
-
 bool api_update_requested = false;
 SemaphoreHandle_t api_data_mutex;
 
-/* ----------  UI-Objects (Site-2)  ---------- */
 lv_obj_t* label_btc_price_screen2;
 lv_obj_t* label_hashrate_screen2;
 lv_obj_t* label_shares_screen2;
@@ -94,7 +109,6 @@ lv_obj_t* label_best_screen2;
 lv_obj_t* label_session_screen2;
 lv_obj_t* label_temp_screen2;
 
-/* ----------  UI-Objects (Site-3)  ---------- */
 lv_obj_t* label_btc_price_screen3;
 lv_obj_t* label_hashrate_screen3;
 lv_obj_t* label_shares_screen3;
@@ -105,8 +119,6 @@ lv_obj_t* label_network_diff_screen3;
 lv_obj_t* label_block_chance_screen3;
 lv_obj_t* label_status_screen3;
 
-
-/* ----------  UI-Objects (Achievements-Site)  ---------- */
 lv_obj_t* label_achievement_1;
 lv_obj_t* label_achievement_2;
 lv_obj_t* label_achievement_3;
@@ -124,8 +136,6 @@ lv_obj_t* label_achievement_14;
 lv_obj_t* label_achievement_15;
 lv_obj_t* label_achievement_16;
 
-
-/* ----------  Achievement Queue  ---------- */
 #define MAX_ACHIEVEMENT_QUEUE 10
 const char* achievement_queue[MAX_ACHIEVEMENT_QUEUE];
 int queue_head = 0;
@@ -135,10 +145,8 @@ lv_obj_t* achievement_overlay = nullptr;
 lv_obj_t* label_achievement_unlocked;
 lv_obj_t* img_achievement_unlocked;
 
-// Preferences for NVS
 Preferences prefs;
 
-// Achievements
 struct Achievement {
   const char* name;
   bool unlocked;
@@ -162,68 +170,76 @@ Achievement achievements[] = {
   { "Share Hoarder", false, "1,000,000 accepted shares", 1000000.0, 0.0, "shares" },
   { "Diamond Hands", false, "5,000,000 accepted shares", 5000000.0, 0.0, "shares" },
   { "Wen Lambo?", false, "Best Diff > 75% of network difficulty", 0.75, 0.0, "best_diff_percent" },
-  { "Rekt (Check your cooling mate)", false, "Temp > 70 degrees", 70.0, 0.0, "temp" },
+  { "Rekt \n(Check your cooling)", false, "Temp > 70 degrees", 70.0, 0.0, "temp" },
   { "Solid Signal", false, "Never gonna give you up,\nnever gonna let you down!\nProviding your Bitaxe data \nsince 1 week!", 604800.0, 0.0, "uptime" },
   { "Timeless Tracker", false, "Never gonna run around and desert you,\nnever gonna make you cry!\nProviding your Bitaxe data \nsince 2 months!", 5184000.0, 0.0, "uptime" }
 };
 
-
+/* ---------- Backlight and LED Pins ---------- */
+#define BACKLIGHT_PIN 21
+#define STATUS_LED_RED_PIN 4
+#define STATUS_LED_GREEN_PIN 16
+#define STATUS_LED_BLUE_PIN 17
 /********************************************************************
- *  LVGL Display Flush
- *******************************************************************/
+* LVGL Display Flush
+*******************************************************************/
 void flush_cb(lv_disp_drv_t* disp_drv, const lv_area_t* area, lv_color_t* color_p) {
   uint16_t w = area->x2 - area->x1 + 1;
   uint16_t h = area->y2 - area->y1 + 1;
-
   tft.startWrite();
   tft.setAddrWindow(area->x1, area->y1, w, h);
   tft.pushColors((uint16_t*)color_p, w * h, true);
   tft.endWrite();
-
   lv_disp_flush_ready(disp_drv);
 }
 
 /********************************************************************
- *  Touch → LVGL Callback
- *******************************************************************/
+* Touch → LVGL Callback
+*******************************************************************/
 void touchscreen_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
   if (touchscreen.tirqTouched() && touchscreen.touched()) {
     TS_Point p = touchscreen.getPoint();
-
-
     data->point.x = map(p.x, 200, 3800, 0, 319);
     data->point.y = map(p.y, 200, 4000, 0, 239);
-
     data->point.x = constrain(data->point.x, 0, 319);
     data->point.y = constrain(data->point.y, 0, 239);
     data->state = LV_INDEV_STATE_PR;
+    lastTouchTime = millis(); 
+    if (!displayOn) {
+      digitalWrite(BACKLIGHT_PIN, HIGH); 
+      displayOn = true;
+    }
   } else {
     data->state = LV_INDEV_STATE_REL;
   }
 }
 
-
 /********************************************************************
- *  Screen-Changing
- *******************************************************************/
+* Screen-Changing
+*******************************************************************/
 static void switch_to_screen1() {
-  if (on_screen2 || on_screen3) {
+  if (on_screen2 || on_screen3 || on_screen_achievements) {
     lv_scr_load(screen1);
     on_screen2 = false;
     on_screen3 = false;
+    on_screen_achievements = false;
   }
 }
+
 static void switch_to_screen2() {
-  if (!on_screen2 && !on_screen3) {
+  if (!on_screen2 && !on_screen3 && !on_screen_achievements) {
     lv_scr_load(screen2);
     on_screen2 = true;
     on_screen3 = false;
-  } else if (on_screen3) {
+    on_screen_achievements = false;
+  } else if (on_screen3 || on_screen_achievements) {
     lv_scr_load(screen2);
     on_screen2 = true;
     on_screen3 = false;
+    on_screen_achievements = false;
   }
 }
+
 static void switch_to_screen3() {
   if (on_screen2 || on_screen_achievements) {
     lv_scr_load(screen3);
@@ -239,13 +255,10 @@ static void switch_to_screen_achievements() {
     on_screen2 = false;
     on_screen3 = false;
     on_screen_achievements = true;
-
-    update_achievements_labels();
+    update_achievements_labels();  
   }
 }
 
-
-/*  Gesture-Callbacks  */
 static void screen1_gesture_event(lv_event_t* e) {
   if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
@@ -275,432 +288,11 @@ static void screen_achievements_gesture_event(lv_event_t* e) {
     if (dir == LV_DIR_LEFT) switch_to_screen3();
   }
 }
-
-
 /********************************************************************
- *  UI  Site 1 (Original)
- *******************************************************************/
-void create_ui() {
-  screen1 = lv_scr_act();
-  lv_obj_add_event_cb(screen1, screen1_gesture_event, LV_EVENT_GESTURE, NULL);
-  lv_obj_clear_flag(screen1, LV_OBJ_FLAG_GESTURE_BUBBLE);
-
-  /*  Labels  ---------------------------------------------------- */
-  label_status = lv_label_create(screen1);
-  lv_obj_set_pos(label_status, 20, 170);
-  lv_obj_set_style_text_color(label_status, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_status, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_status, "");
-
-  label_hashrate = lv_label_create(screen1);
-  lv_obj_set_pos(label_hashrate, 5, 50);
-  lv_obj_set_style_text_color(label_hashrate, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_hashrate, &lv_font_montserrat_12, LV_PART_MAIN);
-  lv_label_set_text(label_hashrate, "HASHRATE: --");
-
-  label_shares = lv_label_create(screen1);
-  lv_obj_set_pos(label_shares, 5, 75);
-  lv_obj_set_style_text_color(label_shares, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_shares, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_shares, "SHARES: --");
-
-  label_best = lv_label_create(screen1);
-  lv_obj_set_pos(label_best, 5, 100);
-  lv_obj_set_style_text_color(label_best, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_best, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_best, "BEST: --");
-
-  label_session = lv_label_create(screen1);
-  lv_obj_set_pos(label_session, 5, 125);
-  lv_obj_set_style_text_color(label_session, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_session, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_session, "SESSION: --");
-
-  label_temp = lv_label_create(screen1);
-  lv_obj_set_pos(label_temp, 5, 150);
-  lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_temp, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_temp, "TEMP: --");
-
-  label_btc_price = lv_label_create(screen1);
-  lv_obj_set_pos(label_btc_price, 5, 5);
-  lv_obj_set_style_text_color(label_btc_price, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_btc_price, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_label_set_text(label_btc_price, "BTC: -- USD");
-
-  label_network_diff = lv_label_create(screen1);
-  lv_obj_set_pos(label_network_diff, 5, 200);
-  lv_obj_set_style_text_color(label_network_diff, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_network_diff, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_network_diff, "Difficulty: -- T");
-
-  label_block_chance = lv_label_create(screen1);
-  lv_obj_set_pos(label_block_chance, 5, 225);
-  lv_obj_set_style_text_color(label_block_chance, lv_color_hex(0xF7931A), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_block_chance, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_block_chance, "Blk/Yr: --");
-
-
-  lv_obj_t* reset_area_screen1 = lv_obj_create(screen1);
-  lv_obj_set_pos(reset_area_screen1, 0, 0);
-  lv_obj_set_size(reset_area_screen1, 320, 240);
-  lv_obj_set_style_bg_opa(reset_area_screen1, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_border_width(reset_area_screen1, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(reset_area_screen1, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_add_flag(reset_area_screen1, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(reset_area_screen1, long_press_reset_handler, LV_EVENT_ALL, NULL);
-  lv_obj_move_background(reset_area_screen1);
-}
-
-/********************************************************************
- *  UI  Site 2
- *******************************************************************/
-void create_screen2() {
-  screen2 = lv_obj_create(NULL);
-  LV_IMG_DECLARE(background2);
-  lv_obj_set_style_bg_img_src(screen2, &background2, LV_PART_MAIN);
-
-  lv_obj_add_event_cb(screen2, screen2_gesture_event, LV_EVENT_GESTURE, NULL);
-  lv_obj_clear_flag(screen2, LV_OBJ_FLAG_GESTURE_BUBBLE);
-
-
-  label_btc_price_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_btc_price_screen2, 219, 30);
-  lv_obj_set_style_text_color(label_btc_price_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_btc_price_screen2, "BTC: -- USD");
-
-
-  label_hashrate_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_hashrate_screen2, 13, 25);
-  lv_obj_set_style_text_color(label_hashrate_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_hashrate_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_hashrate_screen2, "HASHRATE: --");
-
-
-  label_shares_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_shares_screen2, 13, 38);
-  lv_obj_set_style_text_color(label_shares_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_shares_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_shares_screen2, "SHARES: --");
-
-
-  label_best_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_best_screen2, 13, 51);
-  lv_obj_set_style_text_color(label_best_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_best_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_best_screen2, "BEST: --");
-
-
-  label_temp_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_temp_screen2, 13, 64);
-  lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_temp_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_temp_screen2, "TEMP: --");
-
-
-  label_session_screen2 = lv_label_create(screen2);
-  lv_obj_set_pos(label_session_screen2, 13, 77);
-  lv_obj_set_style_text_color(label_session_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_session_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_session_screen2, "SESSION: --");
-  lv_obj_add_flag(label_session_screen2, LV_OBJ_FLAG_HIDDEN);
-
-
-  lv_obj_t* reset_area_screen2 = lv_obj_create(screen2);
-  lv_obj_set_pos(reset_area_screen2, 0, 0);
-  lv_obj_set_size(reset_area_screen2, 320, 240);
-  lv_obj_set_style_bg_opa(reset_area_screen2, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_border_width(reset_area_screen2, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(reset_area_screen2, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_add_flag(reset_area_screen2, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(reset_area_screen2, long_press_reset_handler, LV_EVENT_ALL, NULL);
-  lv_obj_move_background(reset_area_screen2);
-}
-
-/********************************************************************
- *  UI  Site 3
- *******************************************************************/
-void create_screen3() {
-  screen3 = lv_obj_create(NULL);
-  LV_IMG_DECLARE(background3);
-  lv_obj_set_style_bg_img_src(screen3, &background3, LV_PART_MAIN);
-
-  lv_obj_add_event_cb(screen3, screen3_gesture_event, LV_EVENT_GESTURE, NULL);
-  lv_obj_clear_flag(screen3, LV_OBJ_FLAG_GESTURE_BUBBLE);
-
-
-  label_btc_price_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_btc_price_screen3, 8, 180);
-  lv_obj_set_style_text_color(label_btc_price_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_btc_price_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_btc_price_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_btc_price_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_btc_price_screen3, "BTC: -- USD");
-
-
-  label_network_diff_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_network_diff_screen3, 8, 200);
-  lv_obj_set_style_text_color(label_network_diff_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_network_diff_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_network_diff_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_network_diff_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_network_diff_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_network_diff_screen3, "Difficulty: -- T");
-
-
-  label_block_chance_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_block_chance_screen3, 8, 220);
-  lv_obj_set_style_text_color(label_block_chance_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_block_chance_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_block_chance_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_block_chance_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_block_chance_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_block_chance_screen3, "Blk/Yr: --");
-
-
-  label_hashrate_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_hashrate_screen3, 50, 10);
-  lv_obj_set_style_text_color(label_hashrate_screen3, lv_color_hex(0xFFFF00), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_hashrate_screen3, &lv_font_montserrat_22, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_hashrate_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_hashrate_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_hashrate_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_hashrate_screen3, "HASHRATE: --");
-
-
-  label_shares_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_shares_screen3, 8, 45);
-  lv_obj_set_style_text_color(label_shares_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_shares_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_shares_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_shares_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_shares_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_shares_screen3, "SHARES: --");
-
-
-  label_best_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_best_screen3, 8, 65);
-  lv_obj_set_style_text_color(label_best_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_best_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_best_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_best_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_best_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_best_screen3, "BEST: --");
-
-
-  label_session_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_session_screen3, 8, 85);
-  lv_obj_set_style_text_color(label_session_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_session_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_session_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_session_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_session_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_session_screen3, "SESSION: --");
-
-
-  label_temp_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_temp_screen3, 8, 105);
-  lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_temp_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_temp_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_temp_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_temp_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_temp_screen3, "TEMP: --");
-
-
-  label_status_screen3 = lv_label_create(screen3);
-  lv_obj_set_pos(label_status_screen3, 8, 125);
-  lv_obj_set_style_text_color(label_status_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_status_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(label_status_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label_status_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(label_status_screen3, 2, LV_PART_MAIN);
-  lv_label_set_text(label_status_screen3, "");
-
-
-  lv_obj_t* reset_area_screen3 = lv_obj_create(screen3);
-  lv_obj_set_pos(reset_area_screen3, 0, 0);
-  lv_obj_set_size(reset_area_screen3, 320, 240);
-  lv_obj_set_style_bg_opa(reset_area_screen3, LV_OPA_0, LV_PART_MAIN);
-  lv_obj_set_style_border_width(reset_area_screen3, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(reset_area_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
-  lv_obj_add_flag(reset_area_screen3, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(reset_area_screen3, long_press_reset_handler, LV_EVENT_ALL, NULL);
-  lv_obj_move_background(reset_area_screen3);
-}
-
-/********************************************************************
- *  UI  Site Achievements
- *******************************************************************/
-void create_screen_achievements() {
-  screen_achievements = lv_obj_create(NULL);
-  LV_IMG_DECLARE(backgroundachieve);
-  lv_obj_set_style_bg_img_src(screen_achievements, &backgroundachieve, LV_PART_MAIN);
-
-  lv_obj_add_event_cb(screen_achievements, screen_achievements_gesture_event, LV_EVENT_GESTURE, NULL);
-  lv_obj_clear_flag(screen_achievements, LV_OBJ_FLAG_GESTURE_BUBBLE);
-
-  // Titel
-  lv_obj_t* title = lv_label_create(screen_achievements);
-  lv_obj_set_pos(title, 10, 10);
-  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFF00), LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
-  lv_label_set_text(title, "Achievements");
-
-  // Achievement 1
-  label_achievement_1 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_1, 10, 40);
-  lv_obj_set_style_text_color(label_achievement_1, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_1, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_1, achievements[0].unlocked ? "Burn Baby Burn: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_1, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_1, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)0);
-
-  // Achievement 2
-  label_achievement_2 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_2, 10, 60);
-  lv_obj_set_style_text_color(label_achievement_2, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_2, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_2, achievements[1].unlocked ? "Every Hash Counts: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_2, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_2, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)1);
-
-  // Achievement 3
-  label_achievement_3 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_3, 10, 80);
-  lv_obj_set_style_text_color(label_achievement_3, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_3, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_3, achievements[2].unlocked ? "Hash Hustler: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_3, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_3, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)2);
-
-  // Achievement 4
-  label_achievement_4 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_4, 10, 100);
-  lv_obj_set_style_text_color(label_achievement_4, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_4, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_4, achievements[3].unlocked ? "Double Trouble: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_4, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_4, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)3);
-
-  // Achievement 5
-  label_achievement_5 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_5, 10, 120);
-  lv_obj_set_style_text_color(label_achievement_5, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_5, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_5, achievements[4].unlocked ? "G-Club: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_5, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_5, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)4);
-
-  // Achievement 6
-  label_achievement_6 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_6, 10, 140);
-  lv_obj_set_style_text_color(label_achievement_6, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_6, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_6, achievements[5].unlocked ? "Way to Go: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_6, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_6, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)5);
-
-  // Achievement 7
-  label_achievement_7 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_7, 10, 160);
-  lv_obj_set_style_text_color(label_achievement_7, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_7, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_7, achievements[6].unlocked ? "Triple G Club: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_7, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_7, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)6);
-
-  // Achievement 8
-  label_achievement_8 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_8, 10, 180);
-  lv_obj_set_style_text_color(label_achievement_8, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_8, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_8, achievements[7].unlocked ? "Sooo Close: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_8, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_8, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)7);
-
-  // Achievement 9
-  label_achievement_9 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_9, 10, 200);
-  lv_obj_set_style_text_color(label_achievement_9, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_9, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_9, achievements[8].unlocked ? "Cool Runnings: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_9, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_9, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)8);
-
-  // Achievement 10
-  label_achievement_10 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_10, 10, 220);
-  lv_obj_set_style_text_color(label_achievement_10, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_10, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_10, achievements[9].unlocked ? "Block Dreamer: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_10, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_10, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)9);
-
-  // Achievement 11
-  label_achievement_11 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_11, 160, 40);
-  lv_obj_set_style_text_color(label_achievement_11, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_11, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_11, achievements[10].unlocked ? "Share Hoarder: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_11, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_11, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)10);
-
-  // Achievement 12
-  label_achievement_12 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_12, 160, 60);
-  lv_obj_set_style_text_color(label_achievement_12, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_12, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_12, achievements[11].unlocked ? "Diamond Hands: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_12, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_12, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)11);
-
-  // Achievement 13
-  label_achievement_13 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_13, 160, 80);
-  lv_obj_set_style_text_color(label_achievement_13, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_13, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_13, achievements[12].unlocked ? "Wen Lambo?: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_13, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_13, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)12);
-
-  // Achievement 14
-  label_achievement_14 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_14, 160, 100);
-  lv_obj_set_style_text_color(label_achievement_14, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_14, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_14, achievements[13].unlocked ? "Rekt (Check your cooling mate): Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_14, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_14, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)13);
-
-  // Achievement 15
-  label_achievement_15 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_15, 160, 120);
-  lv_obj_set_style_text_color(label_achievement_15, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_15, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_15, achievements[14].unlocked ? "Solid Signal: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_15, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_15, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)14);
-
-  // Achievement 16
-  label_achievement_16 = lv_label_create(screen_achievements);
-  lv_obj_set_pos(label_achievement_16, 160, 140);
-  lv_obj_set_style_text_color(label_achievement_16, lv_color_hex(0x808080), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_achievement_16, &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_achievement_16, achievements[15].unlocked ? "Timeless Tracker: Unlocked" : "???: Locked");
-  lv_obj_add_flag(label_achievement_16, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(label_achievement_16, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)15);
-}
-
-
-
+* WiFi Instructions Overlay
+*******************************************************************/
 void show_wifi_instructions() {
-
   lv_obj_clean(lv_scr_act());
-
-
   lv_obj_t* wifi_overlay = lv_obj_create(lv_scr_act());
   lv_obj_set_size(wifi_overlay, 320, 240);
   lv_obj_align(wifi_overlay, LV_ALIGN_CENTER, 0, 0);
@@ -710,27 +302,24 @@ void show_wifi_instructions() {
   lv_obj_set_scrollbar_mode(wifi_overlay, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(wifi_overlay, LV_OBJ_FLAG_SCROLLABLE);
 
-
   lv_obj_t* title = lv_label_create(wifi_overlay);
   lv_obj_set_pos(title, 10, 10);
-  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFF00), LV_PART_MAIN);  // Yellow text
+  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFF00), LV_PART_MAIN);
   lv_obj_set_style_text_font(title, &lv_font_montserrat_16, LV_PART_MAIN);
   lv_label_set_text(title, "WiFi Setup Required");
 
-  // Instructions text
   lv_obj_t* instructions = lv_label_create(wifi_overlay);
   lv_obj_set_pos(instructions, 10, 40);
-  lv_obj_set_style_text_color(instructions, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+  lv_obj_set_style_text_color(instructions, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(instructions, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_obj_set_width(instructions, 300);
   lv_label_set_long_mode(instructions, LV_LABEL_LONG_WRAP);
   lv_label_set_text(instructions,
-                    "1. Connect to WiFi 'BitaxeMonitorAP'\n"
-                    "   Password: password\n"
-                    "2. Open browser, go to 192.168.4.1\n"
-                    "3. Enter your WiFi details & Bitaxe URL\n"
-                    "4. Save to connect. Device will restart.");
-
+    "1. Connect to WiFi 'BitaxeMonitorAP'\n"
+    " Password: password\n"
+    "2. Open browser, go to 192.168.4.1\n"
+    "3. Enter your WiFi details & Bitaxe URLs\n"
+    "4. Save to connect. Device will restart.");
 
   lv_obj_t* hint = lv_label_create(wifi_overlay);
   lv_obj_set_pos(hint, 10, 200);
@@ -738,11 +327,13 @@ void show_wifi_instructions() {
   lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, LV_PART_MAIN);
   lv_label_set_text(hint, "Waiting for configuration...");
 
-
   lv_obj_invalidate(lv_scr_act());
   lv_refr_now(disp);
 }
-// Function to handle long press for WiFi reset (10 seconds)
+
+/********************************************************************
+* Long Press Reset Handler
+*******************************************************************/
 void long_press_reset_handler(lv_event_t* e) {
   static int long_press_duration = 0;
   if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT) {
@@ -752,7 +343,6 @@ void long_press_reset_handler(lv_event_t* e) {
     if (long_press_duration >= 10000) {
       Serial.println("Long press detected (10s), resetting WiFi settings...");
       WiFi.disconnect(true);
-
       WiFiManager wm;
       wm.resetSettings();
       Serial.println("WiFiManager settings reset complete.");
@@ -765,12 +355,9 @@ void long_press_reset_handler(lv_event_t* e) {
   }
 }
 
-
-
-
 /********************************************************************
- *  Achievement Queue und Popup
- *******************************************************************/
+* Achievement Queue and Popup
+*******************************************************************/
 void enqueue_achievement(const char* achievement_name) {
   if (queue_tail < MAX_ACHIEVEMENT_QUEUE) {
     achievement_queue[queue_tail] = achievement_name;
@@ -778,13 +365,11 @@ void enqueue_achievement(const char* achievement_name) {
     if (!achievement_shown) {
       show_next_achievement();
     }
-
-    update_achievements_labels();
+    update_achievements_labels();  
   } else {
     Serial.println("Achievement queue full, skipping...");
   }
 }
-
 
 void show_next_achievement() {
   if (queue_head < queue_tail) {
@@ -794,9 +379,7 @@ void show_next_achievement() {
 }
 
 void show_achievement_unlocked(const char* achievement_name) {
-  if (achievement_shown) return;  //
-
-
+  if (achievement_shown) return;
   achievement_overlay = lv_obj_create(lv_scr_act());
   lv_obj_set_size(achievement_overlay, 300, 220);
   lv_obj_align(achievement_overlay, LV_ALIGN_TOP_MID, 0, 0);
@@ -807,7 +390,6 @@ void show_achievement_unlocked(const char* achievement_name) {
   lv_obj_set_scrollbar_mode(achievement_overlay, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(achievement_overlay, LV_OBJ_FLAG_SCROLLABLE);
 
-
   img_achievement_unlocked = lv_img_create(achievement_overlay);
   LV_IMG_DECLARE(achievementpopup);
   lv_img_set_src(img_achievement_unlocked, &achievementpopup);
@@ -815,7 +397,6 @@ void show_achievement_unlocked(const char* achievement_name) {
   lv_obj_align(img_achievement_unlocked, LV_ALIGN_TOP_MID, 0, 0);
   lv_obj_set_scrollbar_mode(img_achievement_unlocked, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(img_achievement_unlocked, LV_OBJ_FLAG_SCROLLABLE);
-
 
   lv_obj_t* label_achievement_name = lv_label_create(achievement_overlay);
   lv_obj_set_style_text_color(label_achievement_name, lv_color_hex(0xF7931A), LV_PART_MAIN);
@@ -827,16 +408,14 @@ void show_achievement_unlocked(const char* achievement_name) {
   lv_obj_align(label_achievement_name, LV_ALIGN_TOP_MID, 0, 10);
   lv_label_set_text(label_achievement_name, achievement_name);
 
-
   lv_obj_t* label_achievement_desc = lv_label_create(achievement_overlay);
-  lv_obj_set_pos(label_achievement_desc, 5, 50);
+  lv_obj_set_pos(label_achievement_desc, 5, 70);
   lv_obj_set_style_text_color(label_achievement_desc, lv_color_hex(0xF7931A), LV_PART_MAIN);
   lv_obj_set_style_text_font(label_achievement_desc, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_obj_set_width(label_achievement_desc, 260);
   lv_label_set_long_mode(label_achievement_desc, LV_LABEL_LONG_WRAP);
   lv_obj_set_scrollbar_mode(label_achievement_desc, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(label_achievement_desc, LV_OBJ_FLAG_SCROLLABLE);
-
 
   const char* description = "";
   for (int i = 0; i < sizeof(achievements) / sizeof(Achievement); i++) {
@@ -847,47 +426,34 @@ void show_achievement_unlocked(const char* achievement_name) {
   }
   lv_label_set_text(label_achievement_desc, description);
 
-
   lv_obj_t* close_hint = lv_label_create(achievement_overlay);
   lv_obj_set_pos(close_hint, 20, 190);
   lv_obj_set_style_text_color(close_hint, lv_color_hex(0x808080), LV_PART_MAIN);
   lv_obj_set_style_text_font(close_hint, &lv_font_montserrat_10, LV_PART_MAIN);
   lv_label_set_text(close_hint, "Click to Close");
 
-
   lv_obj_add_event_cb(achievement_overlay, achievement_overlay_click_event, LV_EVENT_CLICKED, NULL);
-
   achievement_shown = true;
 }
-
-
-
 
 static void achievement_overlay_click_event(lv_event_t* e) {
   if (achievement_shown) {
     lv_obj_del(achievement_overlay);
     achievement_overlay = nullptr;
     achievement_shown = false;
-    queue_head++;  //
+    queue_head++;
     show_next_achievement();
   }
 }
-
-
 static lv_obj_t* condition_overlay = nullptr;
 static void show_condition_overlay(lv_event_t* e) {
   if (condition_overlay != nullptr) return;
-
   lv_obj_t* label = lv_event_get_target(e);
   int index = (int)lv_event_get_user_data(e);
-
   if (!achievements[index].unlocked) return;
-
 
   condition_overlay = lv_obj_create(lv_scr_act());
   lv_obj_set_size(condition_overlay, 200, 100);
-
-
   lv_coord_t label_x = lv_obj_get_x(label);
   lv_coord_t label_y = lv_obj_get_y(label);
   lv_coord_t label_height = lv_obj_get_height(label);
@@ -895,39 +461,25 @@ static void show_condition_overlay(lv_event_t* e) {
   lv_coord_t screen_height = 240;
   lv_coord_t overlay_width = 200;
   lv_coord_t overlay_height = 100;
-
-
   lv_coord_t overlay_x = label_x;
   if (label_x + overlay_width > screen_width) {
     overlay_x = screen_width - overlay_width;
-    if (overlay_x < 0) {
-      overlay_x = 0;
-    }
+    if (overlay_x < 0) overlay_x = 0;
   }
-
-
   lv_coord_t overlay_y;
   if (label_y + label_height + 5 + overlay_height <= screen_height) {
-
     overlay_y = label_y + label_height + 5;
   } else {
-
     overlay_y = label_y - overlay_height - 5;
-    if (overlay_y < 0) {
-      overlay_y = 0;
-    }
+    if (overlay_y < 0) overlay_y = 0;
   }
-
-
   lv_obj_set_pos(condition_overlay, overlay_x, overlay_y);
-
   lv_obj_set_style_bg_color(condition_overlay, lv_color_hex(0x333333), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(condition_overlay, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_border_width(condition_overlay, 1, LV_PART_MAIN);
   lv_obj_set_style_border_color(condition_overlay, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_scrollbar_mode(condition_overlay, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(condition_overlay, LV_OBJ_FLAG_SCROLLABLE);
-
 
   lv_obj_t* condition_text = lv_label_create(condition_overlay);
   lv_obj_set_pos(condition_text, 5, 5);
@@ -938,30 +490,23 @@ static void show_condition_overlay(lv_event_t* e) {
   lv_obj_set_style_text_align(condition_text, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
   lv_label_set_text(condition_text, achievements[index].condition);
 
-
   lv_timer_t* timer = lv_timer_create([](lv_timer_t* timer) {
     if (condition_overlay != nullptr) {
       lv_obj_del(condition_overlay);
       condition_overlay = nullptr;
     }
     lv_timer_del(timer);
-  },
-                                      3000, nullptr);
+  }, 3000, nullptr);
 
-
-  lv_obj_add_event_cb(
-    condition_overlay, [](lv_event_t* e) {
-      if (lv_event_get_code(e) == LV_EVENT_RELEASED && condition_overlay != nullptr) {
-        lv_obj_del(condition_overlay);
-        condition_overlay = nullptr;
-      }
-    },
-    LV_EVENT_RELEASED, nullptr);
+  lv_obj_add_event_cb(condition_overlay, [](lv_event_t* e) {
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED && condition_overlay != nullptr) {
+      lv_obj_del(condition_overlay);
+      condition_overlay = nullptr;
+    }
+  }, LV_EVENT_RELEASED, nullptr);
 }
 
-
 void update_achievements_labels() {
-
   lv_label_set_text(label_achievement_1, achievements[0].unlocked ? "Burn Baby Burn: Unlocked" : "???: Locked");
   lv_label_set_text(label_achievement_2, achievements[1].unlocked ? "Every Hash Counts: Unlocked" : "???: Locked");
   lv_label_set_text(label_achievement_3, achievements[2].unlocked ? "Hash Hustler: Unlocked" : "???: Locked");
@@ -975,14 +520,14 @@ void update_achievements_labels() {
   lv_label_set_text(label_achievement_11, achievements[10].unlocked ? "Share Hoarder: Unlocked" : "???: Locked");
   lv_label_set_text(label_achievement_12, achievements[11].unlocked ? "Diamond Hands: Unlocked" : "???: Locked");
   lv_label_set_text(label_achievement_13, achievements[12].unlocked ? "Wen Lambo?: Unlocked" : "???: Locked");
-  lv_label_set_text(label_achievement_14, achievements[13].unlocked ? "Rekt (Check your cooling mate): Unlocked" : "???: Locked");
+  lv_label_set_text(label_achievement_14, achievements[13].unlocked ? "Rekt (Check your cooling): Unlocked" : "???: Locked");
+
   if (label_achievement_15) {
     lv_label_set_text(label_achievement_15, achievements[14].unlocked ? "Solid Signal: Unlocked" : "???: Locked");
   }
   if (label_achievement_16) {
     lv_label_set_text(label_achievement_16, achievements[15].unlocked ? "Timeless Tracker: Unlocked" : "???: Locked");
   }
-
 
   lv_obj_set_style_text_color(label_achievement_1, achievements[0].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
   lv_obj_set_style_text_color(label_achievement_2, achievements[1].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
@@ -998,6 +543,7 @@ void update_achievements_labels() {
   lv_obj_set_style_text_color(label_achievement_12, achievements[11].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
   lv_obj_set_style_text_color(label_achievement_13, achievements[12].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
   lv_obj_set_style_text_color(label_achievement_14, achievements[13].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
+
   if (label_achievement_15) {
     lv_obj_set_style_text_color(label_achievement_15, achievements[14].unlocked ? lv_color_hex(0x00FF00) : lv_color_hex(0x808080), LV_PART_MAIN);
   }
@@ -1006,12 +552,20 @@ void update_achievements_labels() {
   }
 }
 
+void create_bitaxe_indicator(lv_obj_t* screen, int screenIndex) {
+  label_current_bitaxe[screenIndex] = lv_label_create(screen);
+  lv_obj_align(label_current_bitaxe[screenIndex], LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+  lv_obj_set_style_text_color(label_current_bitaxe[screenIndex], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_current_bitaxe[screenIndex], "Bitaxe 1/1");
+}
 
 void save_achievements() {
   prefs.begin("achievements", false);
   for (int i = 0; i < sizeof(achievements) / sizeof(Achievement); i++) {
-    String key = "achv_" + String(i);
-    prefs.putBool(key.c_str(), achievements[i].unlocked);
+    char key[10];  
+    snprintf(key, sizeof(key), "achv_%d", i);
+    prefs.putBool(key, achievements[i].unlocked);
   }
   prefs.end();
   Serial.println("Achievements saved to NVS");
@@ -1020,107 +574,393 @@ void save_achievements() {
 void load_achievements() {
   prefs.begin("achievements", true);
   for (int i = 0; i < sizeof(achievements) / sizeof(Achievement); i++) {
-    String key = "achv_" + String(i);
-    achievements[i].unlocked = prefs.getBool(key.c_str(), false);
+    char key[10];  
+    snprintf(key, sizeof(key), "achv_%d", i);
+    achievements[i].unlocked = prefs.getBool(key, false);
   }
   prefs.end();
   Serial.println("Achievements loaded from NVS");
 }
-
-
-
 /********************************************************************
- *  API-Task  (running on Core 0)
- *******************************************************************/
-void api_task(void* pvParameters)
-{
-    while (1) {
-        if (api_update_requested) {
-            api_update_requested = false;
+* UI Creation Functions (Screens 1-3 and Achievements)
+*******************************************************************/
+void create_ui() {
+  screen1 = lv_scr_act();
+  lv_obj_add_event_cb(screen1, screen1_gesture_event, LV_EVENT_GESTURE, NULL);
+  lv_obj_clear_flag(screen1, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  LV_IMG_DECLARE(background);
+  lv_obj_set_style_bg_img_src(screen1, &background, LV_PART_MAIN);
 
-            // Dynamically build the price API URL based on selected coin
-            String coin_id;
-            if (selected_coin == "BTC") {
-                coin_id = "bitcoin";
-            } else if (selected_coin == "BCH") {
-                coin_id = "bitcoin-cash";
-            } else if (selected_coin == "XEC") {
-                coin_id = "ecash";
-            } else if (selected_coin == "DGB") {
-                coin_id = "digibyte";
-            } else if (selected_coin == "NMC") {
-                coin_id = "namecoin";
-            } else if (selected_coin == "PPC") {
-                coin_id = "peercoin";
-            } else if (selected_coin == "LCC") {
-                coin_id = "litecoin-cash";
-            }
-            
-            String dynamic_price_url = String("https://api.coingecko.com/api/v3/simple/price?ids=") + coin_id + String("&vs_currencies=usd");
-            
-            HTTPClient http_price;
-            http_price.setTimeout(5000);
-            http_price.begin(dynamic_price_url.c_str());
-            int httpCode = http_price.GET();
-            if (httpCode == 200) {
-                String resp = http_price.getString();
-                StaticJsonDocument<512> doc;
-                if (!deserializeJson(doc, resp)) {
-                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
-                        btc_price_usd = doc[coin_id]["usd"].as<double>();
-                        Serial.println("Price fetched successfully from CoinGecko for " + selected_coin + ": " + String(btc_price_usd) + " USD");
-                        xSemaphoreGive(api_data_mutex);
-                    }
-                } else {
-                    Serial.println("JSON parsing error from CoinGecko response");
-                }
-            } else if (httpCode == 429) {
-                Serial.println("CoinGecko rate limit exceeded, retaining last known price");
-            } else {
-                Serial.print("HTTP error from CoinGecko: ");
-                Serial.println(httpCode);
-            }
-            http_price.end();
+  label_status = lv_label_create(screen1);
+  lv_obj_set_pos(label_status, 20, 170);
+  lv_obj_set_style_text_color(label_status, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_status, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_status, "");
 
-            // Fetch network difficulty (specific to coin if possible, default to BTC for now)
-            HTTPClient http_diff;
-            http_diff.setTimeout(5000);
-            http_diff.begin(blockchain_difficulty_url); // Default to BTC, update for other coins if API available
-            if (http_diff.GET() == 200) {
-                double val = http_diff.getString().toDouble();
-                if (val > 0) {
-                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
-                        networkDifficulty = val;
-                        xSemaphoreGive(api_data_mutex);
-                    }
-                }
-            }
-            http_diff.end();
+  label_hashrate = lv_label_create(screen1);
+  lv_obj_set_pos(label_hashrate, 5, 50);
+  lv_obj_set_style_text_color(label_hashrate, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_hashrate, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_hashrate, "HASHRATE: --");
 
-            // Fetch network hashrate (specific to coin if possible, default to BTC for now)
-            HTTPClient http_hash;
-            http_hash.setTimeout(5000);
-            http_hash.begin(blockchain_hashrate_url); // Default to BTC, update for other coins if API available
-            if (http_hash.GET() == 200) {
-                double val = http_hash.getString().toDouble();
-                if (val > 0) {
-                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
-                        networkHashrate = val * 1e9;  // GH/s → H/s
-                        xSemaphoreGive(api_data_mutex);
-                    }
-                }
-            }
-            http_hash.end();
-        }
+  label_shares = lv_label_create(screen1);
+  lv_obj_set_pos(label_shares, 5, 75);
+  lv_obj_set_style_text_color(label_shares, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_shares, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_shares, "SHARES: --");
 
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
+  label_best = lv_label_create(screen1);
+  lv_obj_set_pos(label_best, 5, 100);
+  lv_obj_set_style_text_color(label_best, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_best, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_best, "BEST: --");
+
+  label_session = lv_label_create(screen1);
+  lv_obj_set_pos(label_session, 5, 125);
+  lv_obj_set_style_text_color(label_session, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_session, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_session, "SESSION: --");
+
+  label_temp = lv_label_create(screen1);
+  lv_obj_set_pos(label_temp, 5, 150);
+  lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_temp, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_temp, "TEMP: --");
+
+  label_block_chance = lv_label_create(screen1);
+  lv_obj_set_pos(label_block_chance, 5, 225);
+  lv_obj_set_style_text_color(label_block_chance, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_block_chance, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_block_chance, "Blk/Yr: --");
+
+  label_btc_price = lv_label_create(screen1);
+  lv_obj_set_pos(label_btc_price, 5, 5);
+  lv_obj_set_style_text_color(label_btc_price, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_btc_price, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_label_set_text(label_btc_price, "BTC: -- USD");
+
+  label_network_diff = lv_label_create(screen1);
+  lv_obj_set_pos(label_network_diff, 5, 200);
+  lv_obj_set_style_text_color(label_network_diff, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_network_diff, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_label_set_text(label_network_diff, "Difficulty: -- T");
+
+  lv_obj_t* reset_area_screen1 = lv_obj_create(screen1);
+  lv_obj_set_pos(reset_area_screen1, 0, 0);
+  lv_obj_set_size(reset_area_screen1, 320, 240);
+  lv_obj_set_style_bg_opa(reset_area_screen1, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_border_width(reset_area_screen1, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(reset_area_screen1, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_add_flag(reset_area_screen1, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(reset_area_screen1, long_press_reset_handler, LV_EVENT_ALL, NULL);
+  lv_obj_move_background(reset_area_screen1);
+
+  create_bitaxe_indicator(screen1, 0);
 }
 
+void create_screen2() {
+  screen2 = lv_obj_create(NULL);
+  LV_IMG_DECLARE(background2);
+  lv_obj_set_style_bg_img_src(screen2, &background2, LV_PART_MAIN);
+  lv_obj_add_event_cb(screen2, screen2_gesture_event, LV_EVENT_GESTURE, NULL);
+  lv_obj_clear_flag(screen2, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
+  label_btc_price_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_btc_price_screen2, 219, 30);
+  lv_obj_set_style_text_color(label_btc_price_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_btc_price_screen2, "BTC: -- USD");
 
+  label_hashrate_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_hashrate_screen2, 13, 25);
+  lv_obj_set_style_text_color(label_hashrate_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_hashrate_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_hashrate_screen2, "HASHRATE: --");
 
+  label_shares_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_shares_screen2, 13, 38);
+  lv_obj_set_style_text_color(label_shares_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_shares_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_shares_screen2, "SHARES: --");
 
+  label_best_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_best_screen2, 13, 51);
+  lv_obj_set_style_text_color(label_best_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_best_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_best_screen2, "BEST: --");
+
+  label_temp_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_temp_screen2, 13, 64);
+  lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_temp_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_temp_screen2, "TEMP: --");
+
+  label_session_screen2 = lv_label_create(screen2);
+  lv_obj_set_pos(label_session_screen2, 13, 77);
+  lv_obj_set_style_text_color(label_session_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_session_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_session_screen2, "SESSION: --");
+  lv_obj_add_flag(label_session_screen2, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t* reset_area_screen2 = lv_obj_create(screen2);
+  lv_obj_set_pos(reset_area_screen2, 0, 0);
+  lv_obj_set_size(reset_area_screen2, 320, 240);
+  lv_obj_set_style_bg_opa(reset_area_screen2, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_border_width(reset_area_screen2, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(reset_area_screen2, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_add_flag(reset_area_screen2, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(reset_area_screen2, long_press_reset_handler, LV_EVENT_ALL, NULL);
+  lv_obj_move_background(reset_area_screen2);
+
+  create_bitaxe_indicator(screen2, 1);
+}
+void create_screen3() {
+  screen3 = lv_obj_create(NULL);
+  LV_IMG_DECLARE(background3);
+  lv_obj_set_style_bg_img_src(screen3, &background3, LV_PART_MAIN);
+  lv_obj_add_event_cb(screen3, screen3_gesture_event, LV_EVENT_GESTURE, NULL);
+  lv_obj_clear_flag(screen3, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+  label_btc_price_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_btc_price_screen3, 8, 180);
+  lv_obj_set_style_text_color(label_btc_price_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_btc_price_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_btc_price_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_btc_price_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_btc_price_screen3, "BTC: -- USD");
+
+  label_network_diff_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_network_diff_screen3, 8, 200);
+  lv_obj_set_style_text_color(label_network_diff_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_network_diff_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_network_diff_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_network_diff_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_network_diff_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_network_diff_screen3, "Difficulty: -- T");
+
+  label_block_chance_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_block_chance_screen3, 8, 220);
+  lv_obj_set_style_text_color(label_block_chance_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_block_chance_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_block_chance_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_block_chance_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_block_chance_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_block_chance_screen3, "Blk/Yr: --");
+
+  label_hashrate_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_hashrate_screen3, 50, 10);
+  lv_obj_set_style_text_color(label_hashrate_screen3, lv_color_hex(0xFFFF00), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_hashrate_screen3, &lv_font_montserrat_22, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_hashrate_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_hashrate_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_hashrate_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_hashrate_screen3, "HASHRATE: --");
+
+  label_shares_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_shares_screen3, 8, 45);
+  lv_obj_set_style_text_color(label_shares_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_shares_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_shares_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_shares_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_shares_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_shares_screen3, "SHARES: --");
+
+  label_best_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_best_screen3, 8, 65);
+  lv_obj_set_style_text_color(label_best_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_best_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_best_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_best_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_best_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_best_screen3, "BEST: --");
+
+  label_session_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_session_screen3, 8, 85);
+  lv_obj_set_style_text_color(label_session_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_session_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_session_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_session_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_session_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_session_screen3, "SESSION: --");
+
+  label_temp_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_temp_screen3, 8, 105);
+  lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_temp_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_temp_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_temp_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_temp_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_temp_screen3, "TEMP: --");
+
+  label_status_screen3 = lv_label_create(screen3);
+  lv_obj_set_pos(label_status_screen3, 8, 125);
+  lv_obj_set_style_text_color(label_status_screen3, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_status_screen3, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(label_status_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label_status_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(label_status_screen3, 2, LV_PART_MAIN);
+  lv_label_set_text(label_status_screen3, "");
+
+  lv_obj_t* reset_area_screen3 = lv_obj_create(screen3);
+  lv_obj_set_pos(reset_area_screen3, 0, 0);
+  lv_obj_set_size(reset_area_screen3, 320, 240);
+  lv_obj_set_style_bg_opa(reset_area_screen3, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_border_width(reset_area_screen3, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(reset_area_screen3, lv_color_hex(0x000000), LV_PART_MAIN);
+  lv_obj_add_flag(reset_area_screen3, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(reset_area_screen3, long_press_reset_handler, LV_EVENT_ALL, NULL);
+  lv_obj_move_background(reset_area_screen3);
+
+  create_bitaxe_indicator(screen3, 2);
+}
+
+void create_screen_achievements() {
+  screen_achievements = lv_obj_create(NULL);
+  LV_IMG_DECLARE(backgroundachieve);
+  lv_obj_set_style_bg_img_src(screen_achievements, &backgroundachieve, LV_PART_MAIN);
+  lv_obj_add_event_cb(screen_achievements, screen_achievements_gesture_event, LV_EVENT_GESTURE, NULL);
+  lv_obj_clear_flag(screen_achievements, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  lv_obj_clear_flag(screen_achievements, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t* title = lv_label_create(screen_achievements);
+  lv_obj_set_pos(title, 10, 10);
+  lv_obj_set_style_text_color(title, lv_color_hex(0xFFFF00), LV_PART_MAIN);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_label_set_text(title, "Achievements");
+
+  label_achievement_1 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_1, 10, 40);
+  lv_obj_set_style_text_color(label_achievement_1, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_1, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_1, achievements[0].unlocked ? "Burn Baby Burn: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_1, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_1, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)0);
+
+  label_achievement_2 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_2, 10, 60);
+  lv_obj_set_style_text_color(label_achievement_2, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_2, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_2, achievements[1].unlocked ? "Every Hash Counts: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_2, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_2, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)1);
+
+  label_achievement_3 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_3, 10, 80);
+  lv_obj_set_style_text_color(label_achievement_3, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_3, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_3, achievements[2].unlocked ? "Hash Hustler: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_3, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_3, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)2);
+
+  label_achievement_4 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_4, 10, 100);
+  lv_obj_set_style_text_color(label_achievement_4, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_4, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_4, achievements[3].unlocked ? "Double Trouble: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_4, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_4, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)3);
+
+  label_achievement_5 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_5, 10, 120);
+  lv_obj_set_style_text_color(label_achievement_5, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_5, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_5, achievements[4].unlocked ? "G-Club: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_5, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_5, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)4);
+
+  label_achievement_6 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_6, 10, 140);
+  lv_obj_set_style_text_color(label_achievement_6, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_6, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_6, achievements[5].unlocked ? "Way to Go: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_6, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_6, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)5);
+
+  label_achievement_7 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_7, 10, 160);
+  lv_obj_set_style_text_color(label_achievement_7, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_7, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_7, achievements[6].unlocked ? "Triple G Club: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_7, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_7, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)6);
+
+  label_achievement_8 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_8, 10, 180);
+  lv_obj_set_style_text_color(label_achievement_8, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_8, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_8, achievements[7].unlocked ? "Sooo Close: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_8, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_8, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)7);
+
+  label_achievement_9 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_9, 10, 200);
+  lv_obj_set_style_text_color(label_achievement_9, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_9, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_9, achievements[8].unlocked ? "Cool Runnings: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_9, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_9, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)8);
+
+  label_achievement_10 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_10, 10, 220);
+  lv_obj_set_style_text_color(label_achievement_10, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_10, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_10, achievements[9].unlocked ? "Block Dreamer: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_10, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_10, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)9);
+
+  label_achievement_11 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_11, 160, 40);
+  lv_obj_set_style_text_color(label_achievement_11, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_11, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_11, achievements[10].unlocked ? "Share Hoarder: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_11, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_11, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)10);
+
+  label_achievement_12 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_12, 160, 60);
+  lv_obj_set_style_text_color(label_achievement_12, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_12, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_12, achievements[11].unlocked ? "Diamond Hands: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_12, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_12, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)11);
+
+  label_achievement_13 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_13, 160, 80);
+  lv_obj_set_style_text_color(label_achievement_13, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_13, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_13, achievements[12].unlocked ? "Wen Lambo?: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_13, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_13, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)12);
+
+  label_achievement_14 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_14, 160, 100);
+  lv_obj_set_style_text_color(label_achievement_14, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_14, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_14, achievements[13].unlocked ? "Rekt (Check your cooling): Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_14, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_14, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)13);
+  lv_obj_clear_flag(label_achievement_14, LV_OBJ_FLAG_SCROLLABLE);
+
+  label_achievement_15 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_15, 160, 120);
+  lv_obj_set_style_text_color(label_achievement_15, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_15, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_15, achievements[14].unlocked ? "Solid Signal: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_15, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_15, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)14);
+
+  label_achievement_16 = lv_label_create(screen_achievements);
+  lv_obj_set_pos(label_achievement_16, 160, 140);
+  lv_obj_set_style_text_color(label_achievement_16, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_achievement_16, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(label_achievement_16, achievements[15].unlocked ? "Timeless Tracker: Unlocked" : "???: Locked");
+  lv_obj_add_flag(label_achievement_16, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(label_achievement_16, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)15);
+}
+/********************************************************************
+* Parse Difficulty String to Numeric Value
+*******************************************************************/
 long long parse_diff(String diffStr) {
   diffStr.replace(" ", "");
   long long value = 0;
@@ -1142,68 +982,339 @@ long long parse_diff(String diffStr) {
   return value;
 }
 
-
-void update_data()
-{
-    static unsigned long lastBitaxeUpdate = 0;
-    static unsigned long lastApiUpdate    = 0;
-
-    if (millis() - lastBitaxeUpdate >= 5000) {
-        update_bitaxe_data();
-        lastBitaxeUpdate = millis();
-    }
-    if (millis() - lastApiUpdate >= 30000) { // 30-second interval for API updates
-        api_update_requested = true;
-        lastApiUpdate = millis();
-        Serial.println("API update requested (every 30 seconds)");
-    }
-
-    if (xSemaphoreTake(api_data_mutex, 10)) {
-        char price_str[30];
-        if (btc_price_usd > 0) {
-            // Adjust decimal places based on price value for low-value coins
-            if (btc_price_usd < 1.0) {
-                snprintf(price_str, sizeof(price_str), "%s: %.6f USD", selected_coin.c_str(), btc_price_usd);
-            } else if (btc_price_usd < 10.0) {
-                snprintf(price_str, sizeof(price_str), "%s: %.3f USD", selected_coin.c_str(), btc_price_usd);
-            } else {
-                snprintf(price_str, sizeof(price_str), "%s: %.0f USD", selected_coin.c_str(), btc_price_usd);
-            }
-        } else {
-            snprintf(price_str, sizeof(price_str), "%s: N/A USD", selected_coin.c_str());
-        }
-        lv_label_set_text(label_btc_price, price_str);
-        lv_label_set_text(label_btc_price_screen2, price_str);
-        lv_label_set_text(label_btc_price_screen3, price_str);
-        // Anpassung der Schriftgröße für bestimmte Coins auf Screen 2 und 3 basierend auf dem Preis
-if (btc_price_usd < 0.01) { // Coins mit Preisen unter 0.01 USD (bis zu 6 Nachkommastellen)
-    // Kleinere Schriftgröße für Screen 2
-    lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_8, LV_PART_MAIN);
-    // Kleinere Schriftgröße für Screen 3
-    lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_10, LV_PART_MAIN);
-} else {
-    // Standard-Schriftgröße für Screen 2
-    lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
-    // Standard-Schriftgröße für Screen 3
-    lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
-}
-
-        char diff_str[30];
-        snprintf(diff_str, sizeof(diff_str), "BTC-Diff: %.2f T", networkDifficulty / 1e12);
-        lv_label_set_text(label_network_diff, diff_str);
-        lv_label_set_text(label_network_diff_screen3, diff_str);
-        xSemaphoreGive(api_data_mutex);
-    }
-
-    lv_obj_invalidate(lv_scr_act());
-    lv_refr_now(disp);
-}
-
-
-
 /********************************************************************
- *  Bitaxe-HTTP 
- *******************************************************************/
+* Achievement-Überprüfung (per Gerät, global freischalten)
+*******************************************************************/
+void check_achievements() {
+  bool newlyUnlocked = false;
+  
+  for (int i = 0; i < activeDevices; i++) {
+    if (bitaxeDevices[i].isConnected) {
+      
+      if (bitaxeDevices[i].hashRate >= achievements[1].target_value / 1000.0 && !achievements[1].unlocked) {
+        achievements[1].unlocked = true;
+        enqueue_achievement(achievements[1].name);
+        newlyUnlocked = true;
+      }
+      if (bitaxeDevices[i].hashRate >= achievements[2].target_value / 1000.0 && !achievements[2].unlocked) {
+        achievements[2].unlocked = true;
+        enqueue_achievement(achievements[2].name);
+        newlyUnlocked = true;
+      }
+      if (bitaxeDevices[i].hashRate >= achievements[3].target_value / 1000.0 && !achievements[3].unlocked) {
+        achievements[3].unlocked = true;
+        enqueue_achievement(achievements[3].name);
+        newlyUnlocked = true;
+      }
+
+      
+      if (bitaxeDevices[i].temp >= achievements[0].target_value && !achievements[0].unlocked) {
+        achievements[0].unlocked = true;
+        enqueue_achievement(achievements[0].name);
+        newlyUnlocked = true;
+      }
+      if (bitaxeDevices[i].temp >= achievements[13].target_value && !achievements[13].unlocked) {
+        achievements[13].unlocked = true;
+        enqueue_achievement(achievements[13].name);
+        newlyUnlocked = true;
+      }
+
+      
+      const unsigned long cool_runnings_duration = 600000;
+      if (bitaxeDevices[i].temp < 50.0 && !achievements[8].unlocked) {
+        if (bitaxeDevices[i].cool_runnings_start_time == 0) {
+          bitaxeDevices[i].cool_runnings_start_time = millis();
+        }
+        if (millis() - bitaxeDevices[i].cool_runnings_start_time >= cool_runnings_duration) {
+          achievements[8].unlocked = true;
+          enqueue_achievement(achievements[8].name);
+          bitaxeDevices[i].cool_runnings_start_time = 0;
+          newlyUnlocked = true;
+        }
+      } else {
+        bitaxeDevices[i].cool_runnings_start_time = 0;
+      }
+
+      
+      if (bitaxeDevices[i].sharesAccepted >= achievements[10].target_value && !achievements[10].unlocked) {
+        achievements[10].unlocked = true;
+        enqueue_achievement(achievements[10].name);
+        newlyUnlocked = true;
+      }
+      if (bitaxeDevices[i].sharesAccepted >= achievements[11].target_value && !achievements[11].unlocked) {
+        achievements[11].unlocked = true;
+        enqueue_achievement(achievements[11].name);
+        newlyUnlocked = true;
+      }
+
+      
+      long long bestDiffValue = parse_diff(bitaxeDevices[i].bestDiff);
+      if (bestDiffValue >= achievements[4].target_value && !achievements[4].unlocked) {
+        achievements[4].unlocked = true;
+        enqueue_achievement(achievements[4].name);
+        newlyUnlocked = true;
+      }
+      if (bestDiffValue >= achievements[5].target_value && !achievements[5].unlocked) {
+        achievements[5].unlocked = true;
+        enqueue_achievement(achievements[5].name);
+        newlyUnlocked = true;
+      }
+      if (bestDiffValue >= achievements[6].target_value && !achievements[6].unlocked) {
+        achievements[6].unlocked = true;
+        enqueue_achievement(achievements[6].name);
+        newlyUnlocked = true;
+      }
+      if (bestDiffValue >= achievements[7].target_value && !achievements[7].unlocked) {
+        achievements[7].unlocked = true;
+        enqueue_achievement(achievements[7].name);
+        newlyUnlocked = true;
+      }
+
+      
+      if (selected_coin == "BTC" && xSemaphoreTake(api_data_mutex, 10)) {
+        if (bestDiffValue >= networkDifficulty * achievements[9].target_value && !achievements[9].unlocked) {
+          achievements[9].unlocked = true;
+          enqueue_achievement(achievements[9].name);
+          newlyUnlocked = true;
+        }
+        if (bestDiffValue >= networkDifficulty * achievements[12].target_value && !achievements[12].unlocked) {
+          achievements[12].unlocked = true;
+          enqueue_achievement(achievements[12].name);
+          newlyUnlocked = true;
+        }
+        xSemaphoreGive(api_data_mutex);
+      }
+
+      
+      int64_t current_time = esp_timer_get_time();
+      prefs.begin("uptime", true);
+      int64_t saved_start_time = prefs.getLong64("start_time", 0);
+      prefs.end();
+      unsigned long uptime_seconds = (current_time - saved_start_time) / 1000000;
+      if (uptime_seconds >= achievements[14].target_value && !achievements[14].unlocked) {
+        achievements[14].unlocked = true;
+        enqueue_achievement(achievements[14].name);
+        newlyUnlocked = true;
+      }
+      if (uptime_seconds >= achievements[15].target_value && !achievements[15].unlocked) {
+        achievements[15].unlocked = true;
+        enqueue_achievement(achievements[15].name);
+        newlyUnlocked = true;
+      }
+      
+      vTaskDelay(10 / portTICK_PERIOD_MS);  
+    }
+  }
+
+  if (newlyUnlocked) {
+    save_achievements();
+  }
+}
+/********************************************************************
+* Main Data Update Function
+*******************************************************************/
+void update_data() {
+  static unsigned long lastApiUpdate = 0;
+  
+  
+  if (millis() - lastApiUpdate >= 150000) {
+    api_update_requested = true;
+    lastApiUpdate = millis();
+    Serial.println("API update requested (every 2.5 minutes)");
+  }
+
+  if (activeDevices > 1 && millis() - lastSwitchTime >= switchInterval) {
+    currentBitaxeIndex = (currentBitaxeIndex + 1) % activeDevices;
+    lastSwitchTime = millis();
+  }
+
+  if (activeDevices > 0) {
+    BitaxeData& currentDevice = bitaxeDevices[currentBitaxeIndex];
+    
+    char temp_str[10];
+    char power_str[10];
+    snprintf(temp_str, sizeof(temp_str), "%.1f", currentDevice.temp);
+    snprintf(power_str, sizeof(power_str), "%.1f", currentDevice.power);
+
+    char label_hashrate_text[50];
+    char label_temp_power_text[50]; 
+    char label_temp_only_text[30];
+    char indicatorText[50];
+    
+    
+    if (display_mode == "Combined" && activeDevices > 1) {
+      
+      float totalHashrate = 0.0;
+      for (int i = 0; i < activeDevices; i++) {
+        if (bitaxeDevices[i].isConnected) {
+          totalHashrate += bitaxeDevices[i].hashRate;
+        }
+      }
+      
+      char total_hashrate_str[10];
+      snprintf(total_hashrate_str, sizeof(total_hashrate_str), "%d.%02d", (int)totalHashrate, (int)(totalHashrate * 100) % 100);
+      
+      snprintf(label_hashrate_text, sizeof(label_hashrate_text), "HASHRATE: %s TH/s", total_hashrate_str);
+      snprintf(indicatorText, sizeof(indicatorText), "Combined (%s)", currentDevice.name.c_str());
+      
+    } else {
+      
+      char hashrate_str[10];
+      snprintf(hashrate_str, sizeof(hashrate_str), "%d.%02d", (int)currentDevice.hashRate, (int)(currentDevice.hashRate * 100) % 100);
+      
+      snprintf(label_hashrate_text, sizeof(label_hashrate_text), "HASHRATE: %s TH/s", hashrate_str);
+      if (activeDevices > 1) {
+        snprintf(indicatorText, sizeof(indicatorText), "%s (%d/%d)", currentDevice.name.c_str(), currentBitaxeIndex + 1, activeDevices);
+      } else {
+        snprintf(indicatorText, sizeof(indicatorText), "%s", currentDevice.name.c_str());
+      }
+    }
+    
+    snprintf(label_temp_power_text, sizeof(label_temp_power_text), "TEMP: %s°C | PWR: %sW", temp_str, power_str);
+    snprintf(label_temp_only_text, sizeof(label_temp_only_text), "TEMP: %s°C", temp_str);
+
+    
+    lv_label_set_text(label_hashrate, label_hashrate_text);
+    lv_label_set_text_fmt(label_shares, "SHARES: %d / %d", currentDevice.sharesAccepted, currentDevice.sharesRejected);
+    lv_label_set_text_fmt(label_best, "BEST: %s", currentDevice.bestDiff.c_str());
+    lv_label_set_text_fmt(label_session, "SESSION: %s", currentDevice.sessionDiff.c_str());
+    lv_label_set_text(label_temp, label_temp_power_text);
+
+    
+    lv_label_set_text(label_hashrate_screen2, label_hashrate_text);
+    lv_label_set_text_fmt(label_shares_screen2, "SHARES: %d / %d", currentDevice.sharesAccepted, currentDevice.sharesRejected);
+    lv_label_set_text_fmt(label_best_screen2, "BEST: %s", currentDevice.bestDiff.c_str());
+    lv_label_set_text(label_temp_screen2, label_temp_only_text);
+
+    
+    lv_label_set_text(label_hashrate_screen3, label_hashrate_text);
+    lv_label_set_text_fmt(label_shares_screen3, "SHARES: %d / %d", currentDevice.sharesAccepted, currentDevice.sharesRejected);
+    lv_label_set_text_fmt(label_best_screen3, "BEST: %s", currentDevice.bestDiff.c_str());
+    lv_label_set_text_fmt(label_session_screen3, "SESSION: %s", currentDevice.sessionDiff.c_str());
+    lv_label_set_text(label_temp_screen3, label_temp_power_text);
+
+    
+    if (currentDevice.temp < 60) {
+      lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
+      lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+      lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    } else {
+      lv_obj_set_style_text_color(label_temp, lv_color_hex(0xFF0000), LV_PART_MAIN);
+      lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFF0000), LV_PART_MAIN);
+      lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xFF0000), LV_PART_MAIN);
+    }
+
+    
+    lv_label_set_text(label_current_bitaxe[0], indicatorText);
+    lv_label_set_text(label_current_bitaxe[1], indicatorText);
+    lv_label_set_text(label_current_bitaxe[2], indicatorText);
+  }
+
+  
+  if (xSemaphoreTake(api_data_mutex, 10)) {
+    char price_str[30];
+    if (btc_price_usd > 0) {
+      if (btc_price_usd < 1.0) {
+        snprintf(price_str, sizeof(price_str), "%s: %.6f USD", selected_coin.c_str(), btc_price_usd);
+      } else if (btc_price_usd < 10.0) {
+        snprintf(price_str, sizeof(price_str), "%s: %.3f USD", selected_coin.c_str(), btc_price_usd);
+      } else {
+        snprintf(price_str, sizeof(price_str), "%s: %.0f USD", selected_coin.c_str(), btc_price_usd);
+      }
+    } else {
+      snprintf(price_str, sizeof(price_str), "%s: N/A USD", selected_coin.c_str());
+    }
+    lv_label_set_text(label_btc_price, price_str);
+    lv_label_set_text(label_btc_price_screen2, price_str);
+    lv_label_set_text(label_btc_price_screen3, price_str);
+
+    
+    if (btc_price_usd < 0.01) {
+      lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_8, LV_PART_MAIN);
+      lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_10, LV_PART_MAIN);
+    } else {
+      lv_obj_set_style_text_font(label_btc_price_screen2, &lv_font_montserrat_10, LV_PART_MAIN);
+      lv_obj_set_style_text_font(label_btc_price_screen3, &lv_font_montserrat_14, LV_PART_MAIN);
+    }
+
+    char diff_str[30];
+    if (networkDifficulty > 0) {
+      if (networkDifficulty >= 1e12) {
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.1f T", networkDifficulty / 1e12);
+      } else if (networkDifficulty >= 1e9) {
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.0f G", networkDifficulty / 1e9);
+      } else if (networkDifficulty >= 1e6) {
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.0f M", networkDifficulty / 1e6);
+      } else if (networkDifficulty >= 1e3) {
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.0f K", networkDifficulty / 1e3);
+      } else {
+        snprintf(diff_str, sizeof(diff_str), "Difficulty: %.0f", networkDifficulty);
+      }
+    } else {
+      snprintf(diff_str, sizeof(diff_str), "Difficulty: -- T");
+    }
+    lv_label_set_text(label_network_diff, diff_str);
+    lv_label_set_text(label_network_diff_screen3, diff_str);
+
+    xSemaphoreGive(api_data_mutex);
+  }
+
+  
+  if (activeDevices > 0) {
+    if (xSemaphoreTake(api_data_mutex, 10)) {
+      double hashRateHs;
+      
+      if (display_mode == "Combined" && activeDevices > 1) {
+        
+        float totalHashrate = 0.0;
+        for (int i = 0; i < activeDevices; i++) {
+          if (bitaxeDevices[i].isConnected) {
+            totalHashrate += bitaxeDevices[i].hashRate;
+          }
+        }
+        hashRateHs = totalHashrate * 1e12;
+      } else {
+        
+        hashRateHs = bitaxeDevices[currentBitaxeIndex].hashRate * 1e12;
+      }
+      
+      double blockTimeMinutes = 10.0; 
+      if (selected_coin == "BTC" || selected_coin == "BCH" || selected_coin == "XEC" || 
+          selected_coin == "NMC" || selected_coin == "PPC") {
+        blockTimeMinutes = 10.0;
+      } else if (selected_coin == "DGB") {
+        blockTimeMinutes = 1.25; 
+      } else if (selected_coin == "LCC") {
+        blockTimeMinutes = 2.5; 
+      }
+      
+      double blocksPerYear = (60.0 / blockTimeMinutes) * 24 * 365;
+      double blockChancePerYear = 0.0;
+      
+      if (networkHashrate > 0) {
+        blockChancePerYear = (hashRateHs / networkHashrate) * blocksPerYear * 100;
+      }
+      
+      char chance_str[12];
+      if (blockChancePerYear >= 100.0) {
+        snprintf(chance_str, sizeof(chance_str), "%.0f", blockChancePerYear); 
+      } else {
+        snprintf(chance_str, sizeof(chance_str), "%.4f", blockChancePerYear); 
+      }
+      
+      char label_block_chance_text[30];
+      snprintf(label_block_chance_text, sizeof(label_block_chance_text), "Blk/Yr: %s%%", chance_str);
+      lv_label_set_text(label_block_chance, label_block_chance_text);
+      lv_label_set_text(label_block_chance_screen3, label_block_chance_text);
+      
+      xSemaphoreGive(api_data_mutex);
+    }
+  }
+
+  lv_obj_invalidate(lv_scr_act());
+  lv_refr_now(disp);
+}
+
 void update_bitaxe_data() {
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.reconnect();
@@ -1216,225 +1327,59 @@ void update_bitaxe_data() {
     return;
   }
 
+  int i = currentBitaxeIndex;
+  Serial.printf("Fetching data for active Bitaxe %d\n", i + 1);
+  
   HTTPClient http;
-  http.setTimeout(3000);
-  http.begin(bitaxe_url);
-
-  if (http.GET() == 200) {
-    String jsonResponse = http.getString();
-    StaticJsonDocument<2048> doc;
-    DeserializationError error = deserializeJson(doc, jsonResponse);
-    if (error) {
-      lv_label_set_text(label_status, "JSON ERROR");
-      lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
-      if (label_status_screen3) {
-        lv_label_set_text(label_status_screen3, "JSON ERROR");
-        lv_obj_set_style_text_color(label_status_screen3, lv_color_hex(0xFF0000), LV_PART_MAIN);
-      }
-    } else {
-      float hashRateGHs = doc["hashRate"].as<float>();
-      float hashRate = hashRateGHs / 1000.0;
-      int sharesAccepted = doc["sharesAccepted"].as<int>();
-      int sharesRejected = doc["sharesRejected"].as<int>();
-      String bestDiff = doc["bestDiff"].as<String>();
-      String sessionDiff = doc["bestSessionDiff"].as<String>();
-      float temp = doc["temp"].as<float>();
-      float power = doc["power"].as<float>();
-
-      char hashrate_str[10];
-      char temp_str[10];
-      char power_str[10];
-      snprintf(hashrate_str, sizeof(hashrate_str), "%d.%02d", (int)hashRate, (int)(hashRate * 100) % 100);
-      snprintf(temp_str, sizeof(temp_str), "%.1f", temp);
-      snprintf(power_str, sizeof(power_str), "%.1f", power);
-
-      char chance_str[12];
-      String label_hashrate_text = String("HASHRATE: ") + hashrate_str + " TH/s";
-      String label_temp_power_text = String("TEMP: ") + temp_str + "°C | PWR: " + power_str + "W";
-      String label_temp_only_text = String("TEMP: ") + temp_str + "°C";
-
-      // Aktualisierung auf Seite 1
-      lv_label_set_text(label_hashrate, label_hashrate_text.c_str());
-      lv_label_set_text_fmt(label_shares, "SHARES: %d / %d", sharesAccepted, sharesRejected);
-      lv_label_set_text_fmt(label_best, "BEST: %s", bestDiff.c_str());
-      lv_label_set_text_fmt(label_session, "SESSION: %s", sessionDiff.c_str());
-
-      // Aktualisierung auf Seite 2
-      lv_label_set_text(label_hashrate_screen2, label_hashrate_text.c_str());
-      lv_label_set_text_fmt(label_shares_screen2, "SHARES: %d / %d", sharesAccepted, sharesRejected);
-      lv_label_set_text_fmt(label_best_screen2, "BEST: %s", bestDiff.c_str());
-      lv_label_set_text(label_temp_screen2, label_temp_only_text.c_str());
-
-      // Aktualisierung auf Seite 3
-      lv_label_set_text(label_hashrate_screen3, label_hashrate_text.c_str());
-      lv_label_set_text_fmt(label_shares_screen3, "SHARES: %d / %d", sharesAccepted, sharesRejected);
-      lv_label_set_text_fmt(label_best_screen3, "BEST: %s", bestDiff.c_str());
-      lv_label_set_text_fmt(label_session_screen3, "SESSION: %s", sessionDiff.c_str());
-      lv_label_set_text(label_temp_screen3, label_temp_power_text.c_str());
-
-      if (temp < 60) {
-        lv_obj_set_style_text_color(label_temp, lv_color_hex(0xF7931A), LV_PART_MAIN);
-        lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-        lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-      } else {
-        lv_obj_set_style_text_color(label_temp, lv_color_hex(0xFF0000), LV_PART_MAIN);
-        lv_obj_set_style_text_color(label_temp_screen2, lv_color_hex(0xFF0000), LV_PART_MAIN);
-        lv_obj_set_style_text_color(label_temp_screen3, lv_color_hex(0xFF0000), LV_PART_MAIN);
-      }
-
-      lv_label_set_text(label_temp, label_temp_power_text.c_str());
-      lv_label_set_text(label_status, "");
-      if (label_status_screen3) {
-        lv_label_set_text(label_status_screen3, "");
-      }
-
-      // Coin-specific block time (in minutes) and difficulty adjustment factor
-      // Note: difficulty_adjustment values are approximations for non-BTC coins
-      // and may not reflect real-time network conditions. For BTC, real data is used.
-      double block_time_minutes = 10.0;    // Default for BTC
-      double difficulty_adjustment = 1.0;  // Default for BTC
-
-      if (selected_coin == "BTC") {
-        block_time_minutes = 10.0;
-        difficulty_adjustment = 1.0;  // Real data used
-      } else if (selected_coin == "BCH") {
-        block_time_minutes = 10.0;
-        difficulty_adjustment = 0.07;  // Approx. 7% of BTC difficulty
-      } else if (selected_coin == "XEC") {
-        block_time_minutes = 10.0;
-        difficulty_adjustment = 0.002;  // Approx. 0.2% of BTC difficulty
-      } else if (selected_coin == "DGB") {
-        block_time_minutes = 0.25;       // 15 seconds block time
-        difficulty_adjustment = 0.0005;  // Approx. 0.05% of BTC difficulty    
-      } else if (selected_coin == "NMC") {
-        block_time_minutes = 10.0;
-        difficulty_adjustment = 0.005;  // Approx. 0.5% of BTC difficulty
-      } else if (selected_coin == "PPC") {
-        block_time_minutes = 10.0;
-        difficulty_adjustment = 0.0002;  // Approx. 0.02% of BTC difficulty
-      } else if (selected_coin == "LCC") {
-        block_time_minutes = 2.5;        // Faster block time
-        difficulty_adjustment = 0.0001;  // Approx. 0.01% of BTC difficulty
-      }
-
-      double hashRateHs = hashRate * 1e12;
-      double blocksPerYear = (60.0 / block_time_minutes) * 24 * 365;
-      double blockChancePerYear = 0.0;
-
-      if (xSemaphoreTake(api_data_mutex, 10)) {
-        if (networkHashrate > 0) {
-          // Adjust network hashrate by difficulty factor for approximation
-          double adjustedHashrate = networkHashrate * difficulty_adjustment;
-          blockChancePerYear = (hashRateHs / adjustedHashrate) * blocksPerYear * 100;
+  http.setConnectTimeout(1000);
+  http.setTimeout(2000);
+  http.begin(bitaxeDevices[i].url);
+  int httpCode = http.GET();
+  
+  if (httpCode == 200) {
+    char* jsonResponse = (char*)malloc(4096);
+    if (jsonResponse) {
+      String temp = http.getString();
+      strncpy(jsonResponse, temp.c_str(), 4095);
+      jsonResponse[4095] = '\0';
+      
+      StaticJsonDocument<2048> doc;
+      DeserializationError error = deserializeJson(doc, jsonResponse);
+      
+      if (error) {
+        bitaxeDevices[i].isConnected = false;
+        Serial.printf("JSON Error for active Bitaxe %d\n", i + 1);
+        lv_label_set_text(label_status, "JSON ERROR");
+        lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
+        if (label_status_screen3) {
+          lv_label_set_text(label_status_screen3, "JSON ERROR");
+          lv_obj_set_style_text_color(label_status_screen3, lv_color_hex(0xFF0000), LV_PART_MAIN);
         }
-        xSemaphoreGive(api_data_mutex);
+      } else {
+        float hashRateGHs = doc["hashRate"].as<float>();
+        bitaxeDevices[i].hashRate = hashRateGHs / 1000.0;
+        bitaxeDevices[i].sharesAccepted = doc["sharesAccepted"].as<int>();
+        bitaxeDevices[i].sharesRejected = doc["sharesRejected"].as<int>();
+        bitaxeDevices[i].bestDiff = doc["bestDiff"].as<String>();
+        bitaxeDevices[i].sessionDiff = doc["bestSessionDiff"].as<String>();
+        bitaxeDevices[i].temp = doc["temp"].as<float>();
+        bitaxeDevices[i].power = doc["power"].as<float>();
+        bitaxeDevices[i].isConnected = true;
+        
+        lv_label_set_text(label_status, "");
+        if (label_status_screen3) {
+          lv_label_set_text(label_status_screen3, "");
+        }
+        
+        Serial.printf("Data updated for active Bitaxe %d: Hashrate = %.2f\n", i + 1, bitaxeDevices[i].hashRate);
       }
-
-      snprintf(chance_str, sizeof(chance_str), "%.4f", blockChancePerYear);
-      String label_block_chance_text = String("Blk/Yr: ") + chance_str + "%";
-      lv_label_set_text(label_block_chance, label_block_chance_text.c_str());
-      if (label_block_chance_screen3) {
-        lv_label_set_text(label_block_chance_screen3, label_block_chance_text.c_str());
-      }
-
-      // Überprüfung der Achievements
-if (hashRate > 0) {
-  achievements[1].current_value = hashRate * 1000; // Hashrate in GH/s für "Every Hash Counts"
-  achievements[2].current_value = hashRate * 1000; // Hashrate in GH/s für "Hash Hustler"
-  achievements[3].current_value = hashRate * 1000; // Hashrate in GH/s für "Double Trouble"
-  
-  if (!achievements[1].unlocked && achievements[1].current_value >= achievements[1].target_value) {
-    achievements[1].unlocked = true;
-    enqueue_achievement(achievements[1].name);
-  }
-  if (!achievements[2].unlocked && achievements[2].current_value >= achievements[2].target_value) {
-    achievements[2].unlocked = true;
-    enqueue_achievement(achievements[2].name);
-  }
-  if (!achievements[3].unlocked && achievements[3].current_value >= achievements[3].target_value) {
-    achievements[3].unlocked = true;
-    enqueue_achievement(achievements[3].name);
-  }
-}
-
-if (temp > 0) {
-  achievements[0].current_value = temp; // Temperatur für "Burn Baby Burn"
-  achievements[13].current_value = temp; // Temperatur für "Rekt"
-  
-  if (!achievements[0].unlocked && achievements[0].current_value >= achievements[0].target_value) {
-    achievements[0].unlocked = true;
-    enqueue_achievement(achievements[0].name);
-  }
-  if (!achievements[13].unlocked && achievements[13].current_value >= achievements[13].target_value) {
-    achievements[13].unlocked = true;
-    enqueue_achievement(achievements[13].name);
-  }
-}
-
-static unsigned long cool_runnings_start_time = 0;
-const unsigned long cool_runnings_duration = 600000; // 10 Minuten
-
-// In deiner update-Funktion, wo die Temperatur geprüft wird:
-if (temp < 50.0 && !achievements[8].unlocked) {
-    if (cool_runnings_start_time == 0) {
-        cool_runnings_start_time = millis();
-    }
-    if (millis() - cool_runnings_start_time >= cool_runnings_duration) {
-        achievements[8].unlocked = true;
-        enqueue_achievement(achievements[8].name);
-        cool_runnings_start_time = 0;
-    }
-} else {
-    cool_runnings_start_time = 0;
-}
-
-
-
-if (sharesAccepted > 0) {
-  achievements[10].current_value = sharesAccepted; // Shares für "Share Hoarder"
-  achievements[11].current_value = sharesAccepted; // Shares für "Diamond Hands"
-  
-  if (!achievements[10].unlocked && achievements[10].current_value >= achievements[10].target_value) {
-    achievements[10].unlocked = true;
-    enqueue_achievement(achievements[10].name);
-  }
-  if (!achievements[11].unlocked && achievements[11].current_value >= achievements[11].target_value) {
-    achievements[11].unlocked = true;
-    enqueue_achievement(achievements[11].name);
-  }
-}
-
-// Überprüfung für Best Difficulty (z. B. "G-Club", "Way to Go")
-long long bestDiffValue = parse_diff(bestDiff);
-if (bestDiffValue > 0) {
-  achievements[4].current_value = bestDiffValue; // Best Diff für "G-Club"
-  achievements[5].current_value = bestDiffValue; // Best Diff für "Way to Go"
-  achievements[6].current_value = bestDiffValue; // Best Diff für "Triple G Club"
-  achievements[7].current_value = bestDiffValue; // Best Diff für "Sooo Close"
-  
-  if (!achievements[4].unlocked && achievements[4].current_value >= achievements[4].target_value) {
-    achievements[4].unlocked = true;
-    enqueue_achievement(achievements[4].name);
-  }
-  if (!achievements[5].unlocked && achievements[5].current_value >= achievements[5].target_value) {
-    achievements[5].unlocked = true;
-    enqueue_achievement(achievements[5].name);
-  }
-  if (!achievements[6].unlocked && achievements[6].current_value >= achievements[6].target_value) {
-    achievements[6].unlocked = true;
-    enqueue_achievement(achievements[6].name);
-  }
-  if (!achievements[7].unlocked && achievements[7].current_value >= achievements[7].target_value) {
-    achievements[7].unlocked = true;
-    enqueue_achievement(achievements[7].name);
-  }
-}
-
-// Speichern der Achievements nach Änderungen
-save_achievements();
-
+      free(jsonResponse);
+    } else {
+      Serial.println("JSON Buffer allocation failed");
     }
   } else {
+    bitaxeDevices[i].isConnected = false;
+    Serial.printf("HTTP Error for active Bitaxe %d: Code %d\n", i + 1, httpCode);
     lv_label_set_text(label_status, "HTTP ERROR");
     lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF0000), LV_PART_MAIN);
     if (label_status_screen3) {
@@ -1442,34 +1387,137 @@ save_achievements();
       lv_obj_set_style_text_color(label_status_screen3, lv_color_hex(0xFF0000), LV_PART_MAIN);
     }
   }
+  
   http.end();
 }
 
+void api_task(void* pvParameters) {
+    
+    
+    char dynamic_price_url[200];
+    char coin_id_buf[32];
 
+    while (1) {
+        
+        vTaskDelay(10 / portTICK_PERIOD_MS);  
 
-/********************************************************************
- *  Setup
- *******************************************************************/
+        if (api_update_requested) {
+            
+            if (selected_coin == "BTC") strcpy(coin_id_buf, "bitcoin");
+            else if (selected_coin == "BCH") strcpy(coin_id_buf, "bitcoin-cash");
+            else if (selected_coin == "XEC") strcpy(coin_id_buf, "ecash");
+            else if (selected_coin == "DGB") strcpy(coin_id_buf, "digibyte");
+            else if (selected_coin == "NMC") strcpy(coin_id_buf, "namecoin");
+            else if (selected_coin == "PPC") strcpy(coin_id_buf, "peercoin");
+            else if (selected_coin == "LCC") strcpy(coin_id_buf, "litecoin-cash");
+
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            snprintf(dynamic_price_url, sizeof(dynamic_price_url), 
+                     "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd", 
+                     coin_id_buf);
+            httpClient.setConnectTimeout(1000);
+            httpClient.setTimeout(2000);
+            httpClient.begin(dynamic_price_url);
+            int httpCode = httpClient.GET();
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            
+            if (httpCode == 200) {
+                String resp = httpClient.getString();
+                StaticJsonDocument<512> doc;
+                vTaskDelay(10 / portTICK_PERIOD_MS);
+                
+                if (!deserializeJson(doc, resp)) {
+                    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
+                        btc_price_usd = doc[coin_id_buf]["usd"].as<double>();
+                        xSemaphoreGive(api_data_mutex);
+                    }
+                }
+                vTaskDelay(10 / portTICK_PERIOD_MS);
+            } else {
+                Serial.printf("Price API failed with code: %d\n", httpCode);
+            }
+            httpClient.end();
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+
+            if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
+                if (selected_coin == "BTC") {
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    httpClient.setConnectTimeout(1000);
+                    httpClient.setTimeout(2000);
+                    httpClient.begin(blockchain_difficulty_url);
+                    httpCode = httpClient.GET();
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    
+                    if (httpCode == 200) {
+                        double val = httpClient.getString().toDouble();
+                        if (val > 0) networkDifficulty = val;
+                    }
+                    httpClient.end();
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    httpClient.setConnectTimeout(1000);
+                    httpClient.setTimeout(2000);
+                    httpClient.begin(blockchain_hashrate_url);
+                    httpCode = httpClient.GET();
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    
+                    if (httpCode == 200) {
+                        double val = httpClient.getString().toDouble();
+                        if (val > 0) networkHashrate = val * 1e9;
+                    }
+                    httpClient.end();
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                } else {
+                    
+                    if (selected_coin == "BCH") {
+                        networkDifficulty = 5.15e11;
+                        networkHashrate = 4.52e18;
+                    } else if (selected_coin == "XEC") {
+                        networkDifficulty = 1.5e11;
+                        networkHashrate = 1.2e17;
+                    } else if (selected_coin == "DGB") {
+                        networkDifficulty = 1.81e8;
+                        networkHashrate = 4.58e16;
+                    } else if (selected_coin == "NMC") {
+                        networkDifficulty = 6.86e13;
+                        networkHashrate = 4.96e20;
+                    } else if (selected_coin == "PPC") {
+                        networkDifficulty = 1.5e9;
+                        networkHashrate = 6.8386e15;
+                    } else if (selected_coin == "LCC") {
+                        networkDifficulty = 1.217e7;
+                        networkHashrate = 4.248e14;
+                    }
+                }
+                xSemaphoreGive(api_data_mutex);
+            }
+            api_update_requested = false;
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
-
+  
   api_data_mutex = xSemaphoreCreateMutex();
 
-  /*  TFT  ---------------------------------------------------------- */
+  
   tft.init();
   tft.setRotation(2);
   tft.fillScreen(TFT_BLACK);
 
-  /*  Touch  -------------------------------------------------------- */
+  
   touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   touchscreen.begin(touchscreenSPI);
   touchscreen.setRotation(1);
 
-  /*  LVGL  --------------------------------------------------------- */
+  
   lv_init();
-
-
   static lv_color_t* buf1 = nullptr;
   static lv_color_t* buf2 = nullptr;
   if (ESP.getPsramSize() > 0) {
@@ -1482,10 +1530,7 @@ void setup() {
     buf2 = buf2_fallback;
   }
   static lv_disp_draw_buf_t draw_buf;
-  lv_disp_draw_buf_init(&draw_buf, buf1, buf2,
-                        (ESP.getPsramSize() > 0) ? 320 * 60 : 320 * 20);
-
-
+  lv_disp_draw_buf_init(&draw_buf, buf1, buf2, (ESP.getPsramSize() > 0) ? 320 * 60 : 320 * 20);
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = 320;
@@ -1493,251 +1538,256 @@ void setup() {
   disp_drv.flush_cb = flush_cb;
   disp_drv.draw_buf = &draw_buf;
   disp = lv_disp_drv_register(&disp_drv);
-
-
   lv_indev_drv_init(&indev_drv);
   indev_drv.type = LV_INDEV_TYPE_POINTER;
   indev_drv.read_cb = touchscreen_read;
   lv_indev_drv_register(&indev_drv);
 
-
-  LV_IMG_DECLARE(background);
-  lv_obj_set_style_bg_img_src(lv_scr_act(), &background, LV_PART_MAIN);
-
-
   create_ui();
   create_screen2();
   create_screen3();
   create_screen_achievements();
-
-
   load_achievements();
 
-
+  
   prefs.begin("uptime", true);
   int64_t saved_start_time = prefs.getLong64("start_time", 0);
   prefs.end();
   int64_t current_time = esp_timer_get_time();
   if (saved_start_time == 0) {
-
     prefs.begin("uptime", false);
     prefs.putLong64("start_time", current_time);
     prefs.end();
   }
   Serial.println("Uptime tracking initialized");
 
-  // Initialize WiFiManager
+  
+  prefs.begin("config", true);
+  activeDevices = prefs.getInt("num_devices", 1);
+  for (int i = 1; i <= activeDevices; i++) {
+    bitaxeDevices[i-1].url = prefs.getString(("url" + String(i)).c_str(), "http://YOUR_BITAXE_IP/api/system/info");
+    bitaxeDevices[i-1].name = prefs.getString(("name" + String(i)).c_str(), "Bitaxe " + String(i));
+  }
+  int saved_rotation = prefs.getInt("rotation", 2);
+  bool led_off = prefs.getBool("led_off", false);
+  int display_timeout_min = prefs.getInt("disp_timeout", 0);
+  selected_coin = prefs.getString("coin_select", "BTC");
+  display_mode = prefs.getString("display_mode", "Solo");
+  prefs.end(); 
+
+  
   WiFiManager wm;
-
-  // Enable debug output for WiFiManager to track issues
   wm.setDebugOutput(true);
+  wm.setConfigPortalTimeout(300);
 
-  // HTML for Input Field for Bitaxe IP Address, LED Control, Display Timeout, and Coin Selection
-  String html = R"(
-  <br/>
-  <label for='bitaxe_ip'>Bitaxe IP Address</label>
-  <input type='text' name='bitaxe_ip' id='bitaxe_ip' value='' placeholder='IP (e.g., 192.168.1.100)' size='40'>
-  <br/>
-  <label for='rotation'>Display Rotation (0-3)</label>
-  <input type='text' name='rotation' id='rotation' value='2' size='2'>
-  <br/>
-  <label for='led_off'>Turn Off Status LED</label>
-  <select name='led_off' id='led_off'>
-    <option value='0'>No</option>
-    <option value='1'>Yes</option>
-  </select>
-  <br/>
-  <label for='display_timeout'>Display Timeout</label>
-  <select name='display_timeout' id='display_timeout'>
-    <option value='0'>Never</option>
-    <option value='1'>After 1 min</option>
-    <option value='5'>After 5 min</option>
-    <option value='30'>After 30 min</option>
-  </select>
-  <br/>
-  <label for='coin_select'>Select Coin for Price & Stats</label>
-  <select name='coin_select' id='coin_select'>
-    <option value='BTC'>Bitcoin (BTC)</option>
-    <option value='BCH'>Bitcoin Cash (BCH)</option>
-    <option value='XEC'>eCash (XEC)</option>
-    <option value='DGB'>DigiByte (DGB)</option>    
-    <option value='NMC'>Namecoin (NMC)</option>
-    <option value='PPC'>Peercoin (PPC)</option>
-    <option value='LCC'>Litecoin Cash (LCC)</option>
-  </select>
-)";
+  String html = R"rawliteral(
+    <label for="num_devices">Number of Bitaxe Devices</label>
+    <select name="num_devices" id="num_devices" onchange="showBitaxeFields(this.value)">
+      <option value="1" selected>1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+    </select><br><br>
+    <div id="bitaxe_fields_1">
+      <label for="bitaxe_ip1">Bitaxe 1 IP Address</label>
+      <input type="text" name="bitaxe_ip1"><br>
+      <label for="bitaxe_name1">Bitaxe 1 Name</label>
+      <input type="text" name="bitaxe_name1"><br><br>
+    </div>
+    <div id="bitaxe_fields_2" style="display:none;">
+      <label for="bitaxe_ip2">Bitaxe 2 IP Address</label>
+      <input type="text" name="bitaxe_ip2"><br>
+      <label for="bitaxe_name2">Bitaxe 2 Name</label>
+      <input type="text" name="bitaxe_name2"><br><br>
+    </div>
+    <div id="bitaxe_fields_3" style="display:none;">
+      <label for="bitaxe_ip3">Bitaxe 3 IP Address</label>
+      <input type="text" name="bitaxe_ip3"><br>
+      <label for="bitaxe_name3">Bitaxe 3 Name</label>
+      <input type="text" name="bitaxe_name3"><br><br>
+    </div>
+    <div id="bitaxe_fields_4" style="display:none;">
+      <label for="bitaxe_ip4">Bitaxe 4 IP Address</label>
+      <input type="text" name="bitaxe_ip4"><br>
+      <label for="bitaxe_name4">Bitaxe 4 Name</label>
+      <input type="text" name="bitaxe_name4"><br><br>
+    </div>
+    <div id="bitaxe_fields_5" style="display:none;">
+      <label for="bitaxe_ip5">Bitaxe 5 IP Address</label>
+      <input type="text" name="bitaxe_ip5"><br>
+      <label for="bitaxe_name5">Bitaxe 5 Name</label>
+      <input type="text" name="bitaxe_name5"><br><br>
+    </div>
+    <label for="display_mode">Display Mode</label>
+    <select name="display_mode">
+      <option value="Solo" selected>Solo (Individual Devices)</option>
+      <option value="Combined">Combined (Total Hashrate)</option>
+    </select><br><br>
+    <label for="rotation">Display Rotation (0-3)</label>
+    <input type="text" name="rotation" value="2"><br><br>
+    <label for="led_off">Turn Off Status LED</label>
+    <select name="led_off">
+      <option value="0">No</option>
+      <option value="1">Yes</option>
+    </select><br><br>
+    <label for="display_timeout">Display Timeout</label>
+    <select name="display_timeout">
+      <option value="0">Never</option>
+      <option value="1">After 1 min</option>
+      <option value="5">After 5 min</option>
+      <option value="30">After 30 min</option>
+    </select><br><br>
+    <label for="coin_select">Select Coin for Price & Stats</label>
+    <select name="coin_select">
+      <option value="BTC">Bitcoin (BTC)</option>
+      <option value="BCH">Bitcoin Cash (BCH)</option>
+      <option value="XEC">eCash (XEC)</option>
+      <option value="DGB">DigiByte (DGB)</option>
+      <option value="NMC">Namecoin (NMC)</option>
+      <option value="PPC">Peercoin (PPC)</option>
+      <option value="LCC">Litecoin Cash (LCC)</option>
+    </select><br><br>
+    <script>
+      function showBitaxeFields(num) {
+        for (let i = 1; i <= 5; i++) {
+          let field = document.getElementById('bitaxe_fields_' + i);
+          if (field) field.style.display = (i <= num) ? 'block' : 'none';
+        }
+      }
+      showBitaxeFields(1);
+    </script>
+  )rawliteral";
 
   WiFiManagerParameter custom_html_param(html.c_str());
-
-
-  // Add custom parameters to WiFiManager
   wm.addParameter(&custom_html_param);
 
-// Define the pins for the RGB Status LED (based on user testing)
-#define STATUS_LED_RED_PIN 4
-#define STATUS_LED_GREEN_PIN 16
-#define STATUS_LED_BLUE_PIN 17
-
-
-  // Set callback to save custom parameters to NVS
   wm.setSaveConfigCallback([&wm]() {
     Serial.println("Saving custom configuration...");
     Preferences prefs;
-    prefs.begin("config", false);  // Open Preferences in read-write mode
-    String bitaxe_ip = wm.server->arg("bitaxe_ip");
-    String bitaxe_url_full = "";
-    if (bitaxe_ip != "") {
-      bitaxe_url_full = "http://" + bitaxe_ip + "/api/system/info";
+    prefs.begin("config", false);
+    activeDevices = atoi(wm.server->arg("num_devices").c_str());
+    
+    for (int i = 1; i <= MAX_BITAXE_DEVICES; i++) {
+      char ipKey[15];
+      char nameKey[17];
+      snprintf(ipKey, sizeof(ipKey), "bitaxe_ip%d", i);
+      snprintf(nameKey, sizeof(nameKey), "bitaxe_name%d", i);
+      String ip = wm.server->arg(ipKey);
+      String name = wm.server->arg(nameKey);
+      if (i <= activeDevices && ip != "") {
+        bitaxeDevices[i-1].url = "http://" + ip + "/api/system/info";
+        bitaxeDevices[i-1].name = (name != "") ? name : ("Bitaxe " + String(i));
+        prefs.putString(("url" + String(i)).c_str(), bitaxeDevices[i-1].url);
+        prefs.putString(("name" + String(i)).c_str(), bitaxeDevices[i-1].name);
+      }
     }
     String rotationValue = wm.server->arg("rotation");
     String ledOffValue = wm.server->arg("led_off");
     String displayTimeoutValue = wm.server->arg("display_timeout");
     String coinSelectValue = wm.server->arg("coin_select");
-    prefs.putString("bitaxe_url", bitaxe_url_full);
+    String displayModeValue = wm.server->arg("display_mode");
+    
+    prefs.putInt("num_devices", activeDevices);
     prefs.putInt("rotation", atoi(rotationValue.c_str()));
     prefs.putBool("led_off", ledOffValue == "1");
     prefs.putInt("disp_timeout", atoi(displayTimeoutValue.c_str()));
     prefs.putString("coin_select", coinSelectValue);
+    prefs.putString("display_mode", displayModeValue);
+    
+    selected_coin = coinSelectValue;     
+    display_mode = displayModeValue;     
+    api_update_requested = true;         
+    
     prefs.end();
     Serial.println("Custom configuration saved to NVS");
   });
 
-
-
-  // Set a longer timeout for the configuration portal (in seconds)
-  wm.setConfigPortalTimeout(300);  // Increased to 5 minutes to ensure users have enough time
-
-  // Show WiFi instructions on the display when starting the configuration portal
-  Serial.println("Starting WiFiManager AutoConnect...");
-  show_wifi_instructions();  // Display instructions on the ESP32 screen
-
-  // Try to connect to WiFi or start configuration portal if connection fails
+  show_wifi_instructions();
+  
   if (!wm.autoConnect("BitaxeMonitorAP", "password")) {
-    Serial.println("Failed to connect and hit timeout, restarting ESP32...");
-    ESP.restart();  // Restart ESP32 if connection fails after timeout
+    Serial.println("Failed to connect, restarting...");
+    ESP.restart();
   } else {
     Serial.println("WiFi connected successfully!");
-    // Clean the screen completely and recreate the UI
-    lv_obj_clean(lv_scr_act());       // Remove all objects including the instructions overlay
-    create_ui();                      // Recreate the main UI
-    create_screen2();                 // Recreate screen 2
-    create_screen3();                 // Recreate screen 3
-    create_screen_achievements();     // Recreate achievements screen
-    lv_scr_load(screen1);             // Load the first screen
-    lv_obj_invalidate(lv_scr_act());  // Invalidate to force redraw
-    lv_refr_now(disp);                // Force immediate refresh
   }
 
- // Load saved custom parameters after connection
-prefs.begin("config", true); // Open Preferences in read-only mode
-String saved_bitaxe_url = prefs.getString("bitaxe_url", "http://YOUR_BITAXE_IP/api/system/info");
-int saved_rotation = prefs.getInt("rotation", 2); // Default to 2 if not set
-bool led_off = prefs.getBool("led_off", false); // Default to false (LED on)
-int display_timeout_min = prefs.getInt("disp_timeout", 0); // Default to 0 (Never)
-String loaded_coin = prefs.getString("coin_select", "BTC"); // Default to BTC
-prefs.end();
-
-// Update global variables with saved values
-strncpy(custom_bitaxe_url, saved_bitaxe_url.c_str(), sizeof(custom_bitaxe_url) - 1);
-custom_bitaxe_url[sizeof(custom_bitaxe_url) - 1] = '\0'; // Ensure null termination
-bitaxe_url = custom_bitaxe_url; // Update the global bitaxe_url pointer with the saved value
-selected_coin = loaded_coin; // Correct assignment to selected_coin
+  lv_obj_clean(lv_scr_act());
+  create_ui();
+  create_screen2();
+  create_screen3();
+  create_screen_achievements();
+  lv_scr_load(screen1);
+  lv_obj_invalidate(lv_scr_act());
+  lv_refr_now(disp);
 
 
-  // Apply saved display rotation and corresponding touch rotation
   tft.setRotation(saved_rotation);
-  // Define a mapping for touch rotation based on display rotation
-  // This mapping can be adjusted based on user feedback
   int touch_rotation;
   switch (saved_rotation) {
-    case 0: touch_rotation = 3; break;  // Example mapping, adjust based on feedback
+    case 0: touch_rotation = 3; break;
     case 1: touch_rotation = 0; break;
-    case 2: touch_rotation = 1; break;  // Matches your setup (display 2 -> touch 1)
+    case 2: touch_rotation = 1; break;
     case 3: touch_rotation = 2; break;
-    default: touch_rotation = 1;  // Fallback to your default
+    default: touch_rotation = 1;
   }
   touchscreen.setRotation(touch_rotation);
-  Serial.print("Applied display rotation: ");
-  Serial.println(saved_rotation);
-  Serial.print("Applied touch rotation: ");
-  Serial.println(touch_rotation);
 
-  // Initialize and apply RGB LED setting
   pinMode(STATUS_LED_RED_PIN, OUTPUT);
   pinMode(STATUS_LED_GREEN_PIN, OUTPUT);
   pinMode(STATUS_LED_BLUE_PIN, OUTPUT);
   if (led_off) {
-    digitalWrite(STATUS_LED_RED_PIN, HIGH);    // Turn off red (assuming active LOW)
-    digitalWrite(STATUS_LED_GREEN_PIN, HIGH);  // Turn off green (assuming active LOW)
-    digitalWrite(STATUS_LED_BLUE_PIN, HIGH);   // Turn off blue (assuming active LOW)
-    Serial.println("Status LED turned off (all colors set to HIGH).");
+    digitalWrite(STATUS_LED_RED_PIN, HIGH);
+    digitalWrite(STATUS_LED_GREEN_PIN, HIGH);
+    digitalWrite(STATUS_LED_BLUE_PIN, HIGH);
   } else {
-    digitalWrite(STATUS_LED_RED_PIN, LOW);    // Turn on red (assuming active LOW)
-    digitalWrite(STATUS_LED_GREEN_PIN, LOW);  // Turn on green (assuming active LOW)
-    digitalWrite(STATUS_LED_BLUE_PIN, LOW);   // Turn on blue (assuming active LOW)
-    Serial.println("Status LED is on (all colors set to LOW).");
+    digitalWrite(STATUS_LED_RED_PIN, LOW);
+    digitalWrite(STATUS_LED_GREEN_PIN, LOW);
+    digitalWrite(STATUS_LED_BLUE_PIN, LOW);
   }
 
-// Initialize backlight pin and display timeout settings
-#define BACKLIGHT_PIN 21
   pinMode(BACKLIGHT_PIN, OUTPUT);
-  digitalWrite(BACKLIGHT_PIN, HIGH);  // Assuming active HIGH for backlight ON
-  lastTouchTime = millis();           // Initialize last touch time to current time
-  displayOn = true;                   // Ensure display starts in ON state
-  Serial.println("Display initialized to ON state");
-
-
-
-  // Set the display timeout in milliseconds based on user selection
-  if (display_timeout_min == 0) {
-    DISPLAY_TIMEOUT_MS = 0;  // Never
-  } else if (display_timeout_min == 1) {
-    DISPLAY_TIMEOUT_MS = 60000;  // 1 minute
-  } else if (display_timeout_min == 5) {
-    DISPLAY_TIMEOUT_MS = 300000;  // 5 minutes
-  } else if (display_timeout_min == 30) {
-    DISPLAY_TIMEOUT_MS = 1800000;  // 30 minutes
-  }
-
+  digitalWrite(BACKLIGHT_PIN, HIGH);
   lastTouchTime = millis();
   displayOn = true;
 
+  if (display_timeout_min == 0) DISPLAY_TIMEOUT_MS = 0;
+  else if (display_timeout_min == 1) DISPLAY_TIMEOUT_MS = 60000;
+  else if (display_timeout_min == 5) DISPLAY_TIMEOUT_MS = 300000;
+  else if (display_timeout_min == 30) DISPLAY_TIMEOUT_MS = 1800000;
 
-  xTaskCreatePinnedToCore(api_task, "API_Task", 8192, NULL, 1, NULL, 0);
+  
+  xTaskCreatePinnedToCore(api_task, "API_Task", 16384, NULL, 1, NULL, 0);
   api_update_requested = true;
-
   lv_label_set_text(label_status, "");
+  
+  xTaskCreatePinnedToCore([](void* param) {
+    
+    while (1) {
+        
+        update_bitaxe_data();
+        
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+    }
+  }, "Bitaxe_Task", 16384, NULL, 1, NULL, 0);
 }
 
 
-/********************************************************************
- *  Loop
- *******************************************************************/
 void loop() {
   static uint32_t last_ms = millis();
   uint32_t now_ms = millis();
   lv_tick_inc(now_ms - last_ms);
   last_ms = now_ms;
 
-  // Check for touch to update last activity time and wake display
-  if (touchscreen.touched()) {
-    lastTouchTime = now_ms;  // Update the last touch time on any touch
-    if (!displayOn) {
-      digitalWrite(BACKLIGHT_PIN, HIGH);  // Turn backlight ON (assuming active HIGH)
-      displayOn = true;
-      Serial.println("Display turned ON by touch");
-    }
-  }
-
-  // Check for display timeout (only if timeout is not set to "Never")
   if (displayOn && DISPLAY_TIMEOUT_MS > 0 && (now_ms - lastTouchTime) >= DISPLAY_TIMEOUT_MS) {
-    digitalWrite(BACKLIGHT_PIN, LOW);  // Turn backlight OFF (assuming active HIGH)
+    digitalWrite(BACKLIGHT_PIN, LOW);
     displayOn = false;
-    Serial.println("Display turned OFF due to timeout");
   }
 
   lv_timer_handler();
   update_data();
+  check_achievements();
 
+  
   delay(5);
 }
