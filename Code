@@ -59,7 +59,7 @@ lv_obj_t* img_maintenance_popup;
 const unsigned long MAINTENANCE_INTERVAL_S = 2592000;
 bool maintenance_popup_shown = false;
 bool maintenance_popup_dismissed = false;
-const size_t MIN_HEAP_SIZE = 50000;
+const size_t MIN_HEAP_SIZE = 20000;
 
 String selected_coin = "BTC"; 
 String display_mode = "Solo";
