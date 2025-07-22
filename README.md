@@ -2,42 +2,32 @@
 
 Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your Bitcoin mining hardware (Bitaxe) on a CYD 2432S028R board using an ESP32 microcontroller. Follow this guide to set up and deploy the project with ease.
 
----
-## What's New in Version 3.0
 
-- **Only one file** for Single and Multi Device, with all new features from 2.1.
-- **Combined Hashrate** Option for displaying your total mining power from all devices. **Blockchance per Year** is also combined with that option
+
+
+## What's New in Version 3.2 (latest)
+**Notification System**: Integrated ntfy.sh push alerts for critical mining events such as device offline, low voltage, or high temperature.
 
   ---
   
-## What's New in Version 2.1
 
-### WiFiManager and Custom Display Settings
-This version introduces user-friendly features for setup and customization:
-- **WiFiManager for Easy Configuration**: Configure WiFi credentials, Bitaxe URL, and display rotation via a web portal without modifying the code.
-- **Display Rotation**: Adjust the screen rotation (0-3); 2 is the standard rotation for USB port on the right.
-- **Turnoff Status LED**: Option to turn off the Status Led at the back
-- **"Powersaving"** Mode: Option to turn off the Display after 1min / 5min / 30min / never
-- **Price Data for several mineable Coins**: Choose from BTC, BCH, DGB, XEC, NMC, PPC and LCC
-- **Reset Function**: Reset all settings by long-pressing (10 seconds) anywhere on Layouts 1, 2, or 3 to return to the configuration portal.
-- **Precompiled Firmware**: Download a single `.bin` file to flash the project easily using a web-based tool—no Arduino IDE required.
-- **Multi Device Support**: `Bitaxe_Monitor_Multi_Device.bin` let you add up to 5 Bitaxe devices. Every 30sec the Display changes to the next Bitaxe.
+## Features
+
+-**WiFiManager for Easy Configuration**: Configure WiFi credentials, Bitaxe URL and so on via a web portal without modifying the code.
+
+-**Multi Device Support**: Monitors up to 5 Bitaxe devices, switching display every 30 seconds.
+
+-**Price Data for Mineable Coins**: Supports BTC, BCH, DGB, XEC, NMC, PPC, and LCC.
+
+-**Combined Hashrate Mode**: Displays total mining power from all devices, including combined block chance per year.
+
+-**Swipe Functionality and Multiple Layouts**: Three layouts with gesture navigation (swipe right to advance, left to go back).
+
+-**Achievements System**: Unlock 16 achievements with popups; access page by swiping right from Layout 3 (swipe left to return).
+
+-**Reset Function**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset all settings and return to configuration portal.
 
 ---
-
-## What's New in Version 2.0
-
-### Swipe Functionality and Multiple Layouts
-This updated version supports **three different layouts**:
-- Change the layout by **swiping from the middle of the screen to the right**.
-- Go back to the previous layout by **swiping from the middle to the left**.
-
-### Achievements Feature
-- Unlock achievements and see a **small celebration screen** (close by tapping it).
-- Access the **achievements page** by swiping right from Layout 3 (go back by swiping left).
-- **Press and hold** an achievement to see a brief explanation of why you unlocked it.
-
-Can you unlock every achievement?! (I hope not; there’s an overheating one! xD)
 
 #### Resetting Achievements
 If you want to start fresh:
@@ -72,6 +62,8 @@ Before starting, ensure you have:
 - **Network**:
   - Wi-Fi credentials
   - IP address of your Bitaxe device on your local network
+- **Notifications**:
+  - Smartphone with installed NTFY App from Google Playstore or App Store
 
 ---
 
@@ -106,6 +98,7 @@ This is the easiest way to get started. Flash the firmware directly to your ESP3
    - **Status Led**: Choose if you want to turn it off or leave it on.
    - **Price Data and Blk/Yr***: Choose from BTC, BCH, DGB, XEC, NMC, PPC or LCC
    - **Combined Hashrate**: Option for displaying your total Mining Power
+   - **Notifications**: Option to Turn on Notifications. Download the NTFY App from Google Play Store or App Store. Create a Topic (Choose a non guessable name) in NTFY and enter the Topic to the provided Field in Wifimanager
 5. Click "Save". The ESP32 will restart and connect to your Wi-Fi network using the provided settings.
 
 ### Step 4: Reset Settings if Needed
@@ -172,6 +165,7 @@ Follow the same steps as in Option 1, Step 3 to configure WiFi, Bitaxe URL, and 
 | **Performance/Memory Issues (Option 2)** | Set PSRAM to `Enabled` and Partition Scheme to `HUGE APP`.                                    |
 | **Display Issues**              | - **Rotated Display**: Adjust the „Display Rotation“ value (0-3) in the WiFiManager portal (`192.168.4.1`).<br>- **Incorrect Colors**: Refer to the „Advanced Configuration“ section below for instructions on adjusting color settings.<br>- **Access Portal**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset settings and reopen the portal. |
 | **crashes**                     | - make sure you install the `reset_achievements.bin` first before installing `Bitaxe_Monitor.bin` if your upgrading from 2.1, 2.0 and so on. 
+| **Notification** not working    | Make sure you entered the correct topic you created in NTFY App in Wifimanager
 ---
 
 ## Advanced Configuration: Fixing Color Issues
@@ -196,8 +190,8 @@ If you experience incorrect colors on your display (e.g., blue instead of red/or
    - Check if the colors are now displayed correctly. If not, try the other setting.
 
 ---
-## Bugs
-   - possible Memory Leaks when tracking 4 or more Devices -> still doing stability tests
+**Bugs**
+- some notifications could spam in case of persistent events.
 
 ---
 
