@@ -25,6 +25,8 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 -**Achievements System**: Unlock 16 achievements with popups; access page by swiping right from Layout 3 (swipe left to return).
 
+-**Maintanence Reminder**: reminds you every 30 days to clean the Bitaxe Fans.
+
 -**Reset Function**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset all settings and return to configuration portal.
 
 ---
