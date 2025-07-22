@@ -72,7 +72,7 @@ Before starting, ensure you have:
 ## Option 1: Flash Precompiled Firmware (Recommended for Beginners)
 
 This is the easiest way to get started. Flash the firmware directly to your ESP32 using a web-based tool without installing any software.
-### Step 0: ONLY if your upgrading from an older Version than 3.0
+### Step 0: ONLY if your upgrading from an older Version
 - download and install (see Step 2) the `reset_achievements.bin` file before upgrading, to clear your device NVS. Upgrading without could cause some bugs.
 ### Step 1: Download the Firmware
 - Download the precompiled firmware file `Bitaxe_Monitor.bin` 
