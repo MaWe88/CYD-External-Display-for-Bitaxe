@@ -194,6 +194,7 @@ If you experience incorrect colors on your display (e.g., blue instead of red/or
 ---
 **Bugs**
 - some notifications could spam in case of persistent events.
+- freezes due to memory leak or core hickups; added more checks to trigger a restart in 3.2.1 -> still undergoing testing 
 
 ---
 
