@@ -61,6 +61,7 @@ const unsigned long MAINTENANCE_INTERVAL_S = 2592000;
 bool maintenance_popup_shown = false;
 bool maintenance_popup_dismissed = false;
 const size_t MIN_HEAP_SIZE = 20000;
+unsigned long last_activity_check_time = 0; 
 
 String selected_coin = "BTC";
 String display_mode = "Solo";
@@ -391,32 +392,24 @@ unsigned long get_total_uptime_seconds() {
 void check_display_freeze_simple() {
   static unsigned long last_check = 0;
 
-
   if (millis() - last_check < 30000) return;
   last_check = millis();
-
-
+  last_activity_check_time = millis();
+    
   if (display_activity_counter == last_activity_value) {
-    Serial.printf("WARNING: Display activity frozen! Counter: %lu\n", display_activity_counter);
-    Serial.println("Initiating recovery restart...");
-
-    // Save current state before restart
+    Serial.printf("WARNING: Freeze detected! Counter: %lu\n", display_activity_counter);
+    
     save_current_screen_state();
     save_achievements();
     save_uptime_before_restart();
-
-
     delay(1000);
-
-    Serial.println("Restarting due to display freeze...");
+    Serial.println("Auto-restarting due to freeze...");
     ESP.restart();
+  } else {
+    Serial.printf("Display activity check OK: %lu\n", display_activity_counter);
   }
-
-
   last_activity_value = display_activity_counter;
-  Serial.printf("Display activity check OK: %lu\n", display_activity_counter);
 }
-
 /********************************************************************
 * WiFi Instructions Overlay
 *******************************************************************/
@@ -1832,6 +1825,16 @@ void update_bitaxe_data() {
   http.end();
 
   isFirstDataFetch = false;
+  const unsigned long CHECK_TIMEOUT = 120000;  
+  if (millis() - last_activity_check_time > CHECK_TIMEOUT) {
+    Serial.println("WARNING: No activity check for over 2 minutes! Restarting...");
+    
+    save_current_screen_state();
+    save_achievements();
+    save_uptime_before_restart();
+    delay(1000);  
+    ESP.restart();
+  }
 }
 
 
@@ -2265,7 +2268,10 @@ void loop() {
 
   lv_timer_handler();
 
-
+  if (lv_disp_get_inactive_time(NULL) < 50) {
+    display_activity_counter++;
+    Serial.printf("Counter incremented (active LVGL): %lu\n", display_activity_counter);
+  }
   update_data();
   check_achievements();
 
