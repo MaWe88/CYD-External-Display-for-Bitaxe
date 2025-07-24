@@ -170,26 +170,11 @@ Follow the same steps as in Option 1, Step 3 to configure WiFi, Bitaxe URL, and 
 | **Notification** not working    | Make sure you entered the correct topic you created in NTFY App in Wifimanager
 ---
 
-## Advanced Configuration: Fixing Color Issues
+## Fixing Color Issues
 
-If you experience incorrect colors on your display (e.g., blue instead of red/orange), this is often due to hardware differences in the display driver of the CYD 2432S028R board. You can fix this by adjusting the color order in the configuration file:
+If you experience incorrect colors on your display (e.g., blue instead of red/orange), this is often due to hardware differences in the display driver of the CYD 2432S028R board.
 
-1. **Locate the `User_Setup.h` File**:
-   - Find `User_Setup.h` in your Arduino libraries folder under `Documents\Arduino\libraries\TFT_eSPI`.
-2. **Edit the Color Order**:
-   - Open `User_Setup.h` in a text editor.
-   - Search for the line defining the color order (e.g., `#define TFT_RGB_ORDER TFT_RGB` or `#define TFT_RGB_ORDER TFT_BGR`).
-   - Switch between `TFT_RGB` and `TFT_BGR` by uncommenting one (remove the // on one of them.):
-     ```
-     // #define TFT_RGB_ORDER TFT_RGB  // Colour order Red-Green-Blue
-     // #define TFT_RGB_ORDER TFT_BGR  // Colour order Blue-Green-Red
-     ```
-
-3. **Restart Ardunio**
-4. **Recompile and Upload**:
-   - Save the file, recompile your sketch in the Arduino IDE, and upload it to your ESP32 board.
-5. **Test the Display**:
-   - Check if the colors are now displayed correctly. If not, try the other setting.
+Use the file `bitaxe_monitor_inverted.bin` and your screen colors should be correct. No need to fix it yourself anymore :D
 
 ---
 **Bugs**
