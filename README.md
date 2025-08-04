@@ -5,9 +5,11 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 
 
-## What's New in Version 3.2 (latest)
-**Notification System**: Integrated ntfy.sh push alerts for critical mining events such as device offline, low voltage, or high temperature.
-
+## What's New in Version 3.3 (latest)
+- **4th Layout**: a layout perfect for your Desk. Clock with Hashrate and current Weather. Everything fetched automaticly via API
+  
+- **Status Led**: the status LED now behaves like a Price Up / Down indicator. Up -> green; Down -> red
+  
   ---
   
 
@@ -28,6 +30,8 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 -**Maintanence Reminder**: reminds you every 30 days to clean the Bitaxe Fans.
 
 -**Reset Function**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset all settings and return to configuration portal.
+
+-**Notification System**: Integrated ntfy.sh push alerts for critical mining events such as device offline, low voltage, or high temperature.
 
 ---
 
@@ -97,7 +101,7 @@ This is the easiest way to get started. Flash the firmware directly to your ESP3
    - **Bitaxe URL**: The IP address of your Bitaxe device (e.g., `192.168.1.100`).
    - **Display Rotation (0-3)**: Standard is Rotation 2. Only change if your display looks scrambled or you want to place your display differently (e.g., 2 for USB right, 0 for USB left).
    - **Powersaving**: Choose if you want your Display to turn off after some time (never is standard)
-   - **Status Led**: Choose if you want to turn it off or leave it on.
+   - **Status Led**: Choose if you want to turn it off or leave it on. If on -> Coin Price up green / Coin Price down red
    - **Price Data and Blk/Yr***: Choose from BTC, BCH, DGB, XEC, NMC, PPC or LCC
    - **Combined Hashrate**: Option for displaying your total Mining Power
    - **Notifications**: Option to Turn on Notifications. Download the NTFY App from Google Play Store or App Store. Create a Topic (Choose a non guessable name) in NTFY and enter the Topic to the provided Field in Wifimanager
@@ -168,6 +172,7 @@ Follow the same steps as in Option 1, Step 3 to configure WiFi, Bitaxe URL, and 
 | **Display Issues**              | - **Rotated Display**: Adjust the „Display Rotation“ value (0-3) in the WiFiManager portal (`192.168.4.1`).<br>- **Incorrect Colors**: Refer to the „Advanced Configuration“ section below for instructions on adjusting color settings.<br>- **Access Portal**: Long-press (10 seconds) on Layouts 1, 2, or 3 to reset settings and reopen the portal. |
 | **crashes**                     | - make sure you install the `reset_achievements.bin` first before installing `Bitaxe_Monitor.bin` if your upgrading from 2.1, 2.0 and so on. 
 | **Notification** not working    | Make sure you entered the correct topic you created in NTFY App in Wifimanager
+| **Weather**                     | If the API cant fetch your location via your IP ( while using a VPN for example) weather wont work. 
 ---
 
 ## Fixing Color Issues
@@ -178,8 +183,8 @@ Use the file `bitaxe_monitor_inverted.bin` and your screen colors should be corr
 
 ---
 **Bugs**
-- some notifications could spam in case of persistent events.
-- freezes due to memory leak or core hickups; added more checks to trigger a restart in 3.2.1 -> still undergoing testing 
+- freezes due to memory leak or core hickups; added more checks to trigger a restart in 3.2.1 -> still undergoing testing
+- some weather conditions may be missing or too long for the display 
 
 ---
 
