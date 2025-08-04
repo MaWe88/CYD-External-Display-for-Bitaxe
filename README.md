@@ -7,6 +7,8 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 ## What's New in Version 3.3 (latest)
 - **4th Layout**: a layout perfect for your Desk. Clock with Hashrate and current Weather. Everything fetched automaticly via API
+
+- **New Notification**: If you unlock a Achievement, you will now get a notification via NTFY
   
 - **Status Led**: the status LED now behaves like a Price Up / Down indicator. Up -> green; Down -> red
   
