@@ -6,7 +6,6 @@
 #include <FS.h>
 using fs::FS;
 #include <TFT_eSPI.h>
-#include <esp_timer.h>
 #include <XPT2046_Touchscreen.h>
 #include <SPI.h>
 #include <WiFi.h>
@@ -23,6 +22,7 @@ using fs::FS;
 #include "backgroundachieve.h"
 #include "achievementpopup.h"
 #include "maintenancepopup.h"
+#include "backgroundclock.h"
 
 /* ---------- Touch-Pins ---------- */
 #define XPT2046_IRQ 36
@@ -54,6 +54,7 @@ char custom_display_rotation[2] = "2";
 
 unsigned long lastTouchTime = 0;
 bool displayOn = true;
+bool led_off = false;
 unsigned long DISPLAY_TIMEOUT_MS = 0;
 lv_obj_t* maintenance_popup_overlay = nullptr;
 lv_obj_t* img_maintenance_popup;
@@ -62,7 +63,7 @@ bool maintenance_popup_shown = false;
 bool maintenance_popup_dismissed = false;
 const size_t MIN_HEAP_SIZE = 20000;
 unsigned long last_activity_check_time = 0; 
-
+void update_weather_data(bool force = false);
 String selected_coin = "BTC";
 String display_mode = "Solo";
 
@@ -105,7 +106,7 @@ lv_obj_t* label_temp;
 lv_obj_t* label_block_chance;
 lv_obj_t* label_btc_price;
 lv_obj_t* label_network_diff;
-lv_obj_t* label_current_bitaxe[3];
+lv_obj_t* label_current_bitaxe[4];
 lv_obj_t* maintenance_overlay = nullptr;
 lv_obj_t* img_maintenance;
 lv_obj_t* screen1 = nullptr;
@@ -117,6 +118,7 @@ lv_obj_t* screen_achievements = nullptr;
 bool on_screen_achievements = false;
 
 double btc_price_usd = 0.0;
+double usd_24h_change = 0.0;
 double networkDifficulty = 1.269823e14;
 double networkHashrate = 876.51e18;
 bool api_update_requested = false;
@@ -155,6 +157,27 @@ lv_obj_t* label_achievement_13;
 lv_obj_t* label_achievement_14;
 lv_obj_t* label_achievement_15;
 lv_obj_t* label_achievement_16;
+
+
+lv_obj_t* screen_clock = nullptr;
+bool on_screen_clock = false;
+
+lv_obj_t* label_clock_time;
+lv_obj_t* label_clock_date;
+lv_obj_t* label_clock_hashrate;
+lv_obj_t* label_clock_btc_price;
+lv_obj_t* label_clock_weather;
+lv_obj_t* label_clock_temperature;
+lv_obj_t* label_clock_location;
+
+String weather_description = "--";
+String weather_temp = "--";
+String weather_location = "--";
+float lat = 0.0;
+float lon = 0.0;
+bool weather_data_available = false;
+unsigned long last_weather_update = 0;
+const unsigned long weather_update_interval = 600000; 
 
 #define MAX_ACHIEVEMENT_QUEUE 10
 const char* achievement_queue[MAX_ACHIEVEMENT_QUEUE];
@@ -248,12 +271,25 @@ void touchscreen_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
 * Screen-Changing
 *******************************************************************/
 static void switch_to_screen1() {
-  if (on_screen2 || on_screen3 || on_screen_achievements) {
+  if (on_screen2 || on_screen3 || on_screen_achievements || on_screen_clock) { 
+    on_screen2 = false;
+    on_screen3 = false;
+    on_screen_achievements = false;
+    on_screen_clock = false;  
+    save_current_screen_state();
     lv_scr_load(screen1);
+  }
+}
+
+static void switch_to_screen_clock() {
+  if (!on_screen_clock) {
+    lv_scr_load(screen_clock);
+    on_screen_clock = true;
     on_screen2 = false;
     on_screen3 = false;
     on_screen_achievements = false;
     save_current_screen_state();
+    update_weather_data(true); 
   }
 }
 
@@ -262,32 +298,36 @@ static void switch_to_screen2() {
     lv_scr_load(screen2);
     on_screen2 = true;
     on_screen3 = false;
+    on_screen_clock = false;
     on_screen_achievements = false;
     save_current_screen_state();
   } else if (on_screen3 || on_screen_achievements) {
     lv_scr_load(screen2);
     on_screen2 = true;
     on_screen3 = false;
+    on_screen_clock = false;
     on_screen_achievements = false;
     save_current_screen_state();
   }
 }
 
 static void switch_to_screen3() {
-  if (on_screen2 || on_screen_achievements) {
+  if (on_screen2 || on_screen_achievements || on_screen_clock) {  
     lv_scr_load(screen3);
     on_screen2 = false;
     on_screen3 = true;
+    on_screen_clock = false;  
     on_screen_achievements = false;
     save_current_screen_state();
   }
 }
 
 static void switch_to_screen_achievements() {
-  if (on_screen3) {
+  if (on_screen3 || on_screen_clock) { 
     lv_scr_load(screen_achievements);
     on_screen2 = false;
     on_screen3 = false;
+    on_screen_clock = false;
     on_screen_achievements = true;
     update_achievements_labels();
     save_current_screen_state();
@@ -297,9 +337,22 @@ static void switch_to_screen_achievements() {
 static void screen1_gesture_event(lv_event_t* e) {
   if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-    if (dir == LV_DIR_RIGHT) switch_to_screen2();
+    if (dir == LV_DIR_RIGHT) switch_to_screen2();  
+    if (dir == LV_DIR_LEFT) switch_to_screen_achievements();  
   }
 }
+
+static void screen_clock_gesture_event(lv_event_t* e) {
+  if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+    if (dir == LV_DIR_LEFT) {
+      switch_to_screen3();
+    } else if (dir == LV_DIR_RIGHT) {
+      switch_to_screen_achievements();
+    }
+  }
+}
+
 
 static void screen2_gesture_event(lv_event_t* e) {
   if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
@@ -313,14 +366,15 @@ static void screen3_gesture_event(lv_event_t* e) {
   if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     if (dir == LV_DIR_LEFT) switch_to_screen2();
-    if (dir == LV_DIR_RIGHT) switch_to_screen_achievements();
+    if (dir == LV_DIR_RIGHT) switch_to_screen_clock();
   }
 }
 
 static void screen_achievements_gesture_event(lv_event_t* e) {
   if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-    if (dir == LV_DIR_LEFT) switch_to_screen3();
+    if (dir == LV_DIR_LEFT) switch_to_screen_clock();
+    if (dir == LV_DIR_RIGHT) switch_to_screen1(); 
   }
 }
 
@@ -329,6 +383,7 @@ void save_current_screen_state() {
   if (on_screen2) screen_state = 2;
   else if (on_screen3) screen_state = 3;
   else if (on_screen_achievements) screen_state = 4;
+  else if (on_screen_clock) screen_state = 5;  
 
   prefs.begin("system", false);
   prefs.putInt("last_screen", screen_state);
@@ -343,7 +398,6 @@ void restore_screen_state() {
 
   Serial.printf("Restoring screen state: %d\n", last_screen);
 
-  // Small delay to ensure UI is ready
   delay(1000);
 
   switch (last_screen) {
@@ -358,6 +412,10 @@ void restore_screen_state() {
     case 4:
       switch_to_screen_achievements();
       Serial.println("Restored to Achievements");
+      break;
+    case 5:  
+      switch_to_screen_clock();
+      Serial.println("Restored to Clock Screen");
       break;
     default:
       switch_to_screen1();
@@ -678,11 +736,13 @@ void update_achievements_labels() {
 }
 
 void create_bitaxe_indicator(lv_obj_t* screen, int screenIndex) {
-  label_current_bitaxe[screenIndex] = lv_label_create(screen);
-  lv_obj_align(label_current_bitaxe[screenIndex], LV_ALIGN_BOTTOM_RIGHT, -10, -10);
-  lv_obj_set_style_text_color(label_current_bitaxe[screenIndex], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_10, LV_PART_MAIN);
-  lv_label_set_text(label_current_bitaxe[screenIndex], "Bitaxe 1/1");
+  if (screenIndex < 5) {  
+    label_current_bitaxe[screenIndex] = lv_label_create(screen);
+    lv_obj_align(label_current_bitaxe[screenIndex], LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_set_style_text_color(label_current_bitaxe[screenIndex], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_label_set_text(label_current_bitaxe[screenIndex], "Bitaxe 1/1");
+  }
 }
 
 void save_achievements() {
@@ -1082,6 +1142,257 @@ void create_screen_achievements() {
   lv_label_set_text(label_achievement_16, achievements[15].unlocked ? "Timeless Tracker: Unlocked" : "???: Locked");
   lv_obj_add_flag(label_achievement_16, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(label_achievement_16, show_condition_overlay, LV_EVENT_LONG_PRESSED, (void*)15);
+}
+
+void create_screen_clock() {
+  screen_clock = lv_obj_create(NULL);
+  LV_IMG_DECLARE(backgroundclock);
+  lv_obj_set_style_bg_img_src(screen_clock, &backgroundclock, LV_PART_MAIN);
+  lv_obj_add_event_cb(screen_clock, screen_clock_gesture_event, LV_EVENT_GESTURE, NULL);
+  lv_obj_clear_flag(screen_clock, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+  
+  label_clock_time = lv_label_create(screen_clock);
+  lv_obj_align(label_clock_time, LV_ALIGN_TOP_MID, 0, 10);  
+  lv_obj_set_style_text_color(label_clock_time, lv_color_hex(0xFFFF00), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_time, &lv_font_montserrat_28, LV_PART_MAIN);
+  lv_label_set_text(label_clock_time, "12:00 AM");
+
+  
+  label_clock_date = lv_label_create(screen_clock);
+  lv_obj_align(label_clock_date, LV_ALIGN_TOP_MID, 0, 50);  
+  lv_obj_set_style_text_color(label_clock_date, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_date, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_label_set_text(label_clock_date, "Monday, Jan 01");
+
+  
+  label_clock_hashrate = lv_label_create(screen_clock);
+  lv_obj_align(label_clock_hashrate, LV_ALIGN_TOP_MID, 0, 80);  
+  lv_obj_set_style_text_color(label_clock_hashrate, lv_color_hex(0xF7931A), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_hashrate, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_label_set_text(label_clock_hashrate, "Hashrate: -- TH/s");
+
+  label_clock_weather = lv_label_create(screen_clock);
+  lv_obj_set_pos(label_clock_weather, 10, 120);
+  lv_obj_set_style_text_color(label_clock_weather, lv_color_hex(0x00FFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_weather, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_label_set_long_mode(label_clock_weather, LV_LABEL_LONG_WRAP);  
+  lv_obj_set_width(label_clock_weather, 150);
+  lv_label_set_text(label_clock_weather, "Weather: Loading...");
+
+  
+  label_clock_temperature = lv_label_create(screen_clock);
+  lv_obj_set_pos(label_clock_temperature, 10, 145);
+  lv_obj_set_style_text_color(label_clock_temperature, lv_color_hex(0x00FFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_temperature, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_label_set_text(label_clock_temperature, "Temp: -- °C");
+
+  
+  label_clock_location = lv_label_create(screen_clock);
+  lv_obj_set_pos(label_clock_location, 10, 170);
+  lv_obj_set_style_text_color(label_clock_location, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_text_font(label_clock_location, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_long_mode(label_clock_location, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(label_clock_location, 150);
+  lv_label_set_text(label_clock_location, "Location: --");
+
+  
+  lv_obj_t* reset_area_clock = lv_obj_create(screen_clock);
+  lv_obj_set_pos(reset_area_clock, 0, 0);
+  lv_obj_set_size(reset_area_clock, 320, 240);
+  lv_obj_set_style_bg_opa(reset_area_clock, LV_OPA_0, LV_PART_MAIN);
+  lv_obj_set_style_border_width(reset_area_clock, 0, LV_PART_MAIN);
+  lv_obj_add_flag(reset_area_clock, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(reset_area_clock, LV_OBJ_FLAG_GESTURE_BUBBLE);
+  lv_obj_add_event_cb(reset_area_clock, long_press_reset_handler, LV_EVENT_ALL, NULL);
+  lv_obj_move_background(reset_area_clock);
+
+  create_bitaxe_indicator(screen_clock, 3);
+}
+
+void update_weather_data(bool force) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  static bool location_fetched = false;
+  static unsigned long last_location_attempt = 0;
+  const unsigned long location_retry_interval = 60000;
+
+  
+  if (!location_fetched && (force || millis() - last_location_attempt > location_retry_interval)) {
+    WiFiClient client;  
+    HTTPClient http;
+    http.begin(client, "http://ip-api.com/json/?fields=lat,lon,city,country");
+    http.setConnectTimeout(15000); 
+    int httpCode = http.GET();
+    last_location_attempt = millis();
+
+    if (httpCode == -1) {  
+      Serial.println("Location failed (-1) - Retrying in 2 seconds...");
+      delay(2000);
+      httpCode = http.GET();  
+    }
+
+    if (httpCode == 200) {
+      DynamicJsonDocument doc(512);
+      if (!deserializeJson(doc, http.getString())) {
+        lat = doc["lat"];
+        lon = doc["lon"];
+        weather_location = doc["city"].as<String>() + ", " + doc["country"].as<String>();
+        location_fetched = true;
+        Serial.printf("Location fetched: %s (%.2f, %.2f)\n", weather_location.c_str(), lat, lon);
+      }
+    } else {
+      Serial.printf("Location API failed: %d\n", httpCode);
+    }
+    http.end();
+  }
+
+  
+  static unsigned long last_weather_attempt = 0;
+  const unsigned long weather_attempt_interval = 120000;
+  if (location_fetched && (force || millis() - last_weather_update > weather_update_interval || millis() - last_weather_attempt > weather_attempt_interval)) {
+    WiFiClient client;  
+    HTTPClient http;
+    String url = "http://api.open-meteo.com/v1/forecast?latitude=" + String(lat) +
+                 "&longitude=" + String(lon) +
+                 "&current=temperature_2m,weather_code&timezone=auto";  
+    http.begin(client, url);
+    http.setConnectTimeout(15000);  
+    int httpCode = http.GET();
+    last_weather_attempt = millis();
+
+    if (httpCode == -1) {  
+      Serial.println("Weather failed (-1) - Retrying in 2 seconds...");
+      delay(2000);
+      httpCode = http.GET();  
+    }
+
+    if (httpCode == 200) {
+      DynamicJsonDocument doc(1024);
+      if (!deserializeJson(doc, http.getString())) {
+        weather_temp = String(doc["current"]["temperature_2m"].as<float>(), 1);
+        int weather_code = doc["current"]["weather_code"].as<int>();
+        switch (weather_code) {
+          case 0: weather_description = "Clear sky"; break;
+          case 1: weather_description = "Mainly clear"; break;
+          case 2: weather_description = "Partly cloudy"; break;
+          case 3: weather_description = "Overcast"; break;
+          case 45: weather_description = "Fog"; break;
+          case 48: weather_description = "Depositing rime fog"; break;
+          case 51: weather_description = "Light drizzle"; break;
+          case 52: weather_description = "Moderate drizzle"; break;
+          case 53: weather_description = "Dense drizzle"; break;
+          case 56: weather_description = "Light freezing drizzle"; break;
+          case 57: weather_description = "Dense freezing drizzle"; break;
+          case 61: weather_description = "Slight rain"; break;
+          case 63: weather_description = "Moderate rain"; break;
+          case 65: weather_description = "Heavy rain"; break;
+          case 66: weather_description = "Light freezing rain"; break;
+          case 67: weather_description = "Heavy freezing rain"; break;
+          case 71: weather_description = "Slight snow fall"; break;
+          case 73: weather_description = "Moderate snow fall"; break;
+          case 75: weather_description = "Heavy snow fall"; break;
+          case 77: weather_description = "Snow grains"; break;
+          case 80: weather_description = "Slight rain showers"; break;
+          case 81: weather_description = "Moderate rain showers"; break;
+          case 82: weather_description = "Violent rain showers"; break;
+          case 85: weather_description = "Slight snow showers"; break;
+          case 86: weather_description = "Heavy snow showers"; break;
+          case 95: weather_description = "Thunderstorm"; break;
+          case 96: weather_description = "Thunderstorm with slight hail"; break;
+          case 99: weather_description = "Thunderstorm with heavy hail"; break;
+          default: weather_description = "Unknown"; break;
+        }
+
+        weather_data_available = true;
+        last_weather_update = millis();
+        Serial.printf("Weather updated: %s, %s°C\n", weather_description.c_str(), weather_temp.c_str());
+      }
+    } else {
+      Serial.printf("Weather API failed: %d\n", httpCode);
+    }
+    http.end();
+  }
+}
+
+
+
+void update_clock_display() {
+  
+  
+  time_t now;
+  struct tm timeinfo;
+  time(&now);
+  localtime_r(&now, &timeinfo);
+  
+  char time_str[20];
+  char date_str[30];
+  
+  int hour12 = timeinfo.tm_hour;
+  const char* ampm = "AM";
+  
+  if (hour12 == 0) {
+    hour12 = 12;
+  } else if (hour12 > 12) {
+    hour12 -= 12;
+    ampm = "PM";
+  } else if (hour12 == 12) {
+    ampm = "PM";
+  }
+  
+  snprintf(time_str, sizeof(time_str), "%d:%02d %s", hour12, timeinfo.tm_min, ampm);
+  
+  const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+  const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  
+  snprintf(date_str, sizeof(date_str), "%s, %s %02d", 
+           weekdays[timeinfo.tm_wday], 
+           months[timeinfo.tm_mon], 
+           timeinfo.tm_mday);
+
+  
+  char hashrate_str[30];
+  if (activeDevices > 0) {
+    BitaxeData& currentDevice = bitaxeDevices[currentBitaxeIndex];
+    
+    if (display_mode == "Combined" && activeDevices > 1) {
+      float totalHashrate = 0.0;
+      for (int i = 0; i < activeDevices; i++) {
+        if (bitaxeDevices[i].isConnected) {
+          totalHashrate += bitaxeDevices[i].hashRate;
+        }
+      }
+      snprintf(hashrate_str, sizeof(hashrate_str), "Hashrate: %.2f TH/s", totalHashrate);
+    } else {
+      snprintf(hashrate_str, sizeof(hashrate_str), "Hashrate: %.2f TH/s", currentDevice.hashRate);
+    }
+  } else {
+    snprintf(hashrate_str, sizeof(hashrate_str), "Hashrate: -- TH/s");
+  }
+
+    
+  if (on_screen_clock) {
+    lv_label_set_text(label_clock_time, time_str);
+    lv_label_set_text(label_clock_date, date_str);
+    lv_label_set_text(label_clock_hashrate, hashrate_str);
+        
+    
+    if (weather_data_available) {
+      char weather_str[50];
+      char temp_str[30];
+      snprintf(weather_str, sizeof(weather_str), "Weather: %s", weather_description.c_str());
+      snprintf(temp_str, sizeof(temp_str), "Temp: %s°C", weather_temp.c_str());
+      lv_label_set_text(label_clock_weather, weather_str);
+      lv_label_set_text(label_clock_temperature, temp_str);
+      lv_label_set_text(label_clock_location, weather_location.c_str());
+    } else {
+      lv_label_set_text(label_clock_weather, "Weather: Loading...");
+      lv_label_set_text(label_clock_temperature, "Temp: --");
+      lv_label_set_text(label_clock_location, "Getting location...");
+    }
+    
+    lv_obj_invalidate(screen_clock);  
+  }
 }
 
 void show_maintenance_popup() {
@@ -1622,6 +1933,7 @@ static bool wifiWasDisconnected = false;
 static unsigned long disconnectStart = 0;
 
 static unsigned long offlineStartTime = 0;
+static bool offlineNotifSent = false;
 const unsigned long OFFLINE_TIMER = 30000;
 
 void update_bitaxe_data() {
@@ -1708,13 +2020,11 @@ void update_bitaxe_data() {
         static bool sentOnlineNotif = false;
         const unsigned long EVENT_TIMER = 30000;
 
-        if (!wasConnected && !isFirstDataFetch && !sentOnlineNotif) {
-          send_notification("Bitaxe Online",
-                            bitaxeDevices[i].name + " is back online", "default");
-          sentOnlineNotif = true;
-        } else if (wasConnected) {
-          sentOnlineNotif = false;
+        if (offlineStartTime > 0 && offlineNotifSent) {
+          send_notification("Bitaxe Online", bitaxeDevices[i].name + " is back online", "default");
         }
+        offlineStartTime = 0;  
+        offlineNotifSent = false;  
 
         bitaxeDevices[i].isConnected = true;
 
@@ -1799,18 +2109,15 @@ void update_bitaxe_data() {
     }
   } else {
 
+    if (offlineStartTime == 0) {
+    offlineStartTime = millis();
+  }
 
-
-    if (offlineStartTime == 0 && wasConnected) {
-      offlineStartTime = millis();  
-    }
-
-
-    if (offlineStartTime > 0 && (millis() - offlineStartTime >= OFFLINE_TIMER)) {
-      send_notification("Bitaxe Offline",
-                        bitaxeDevices[i].name + " is not responding (HTTP " + String(httpCode) + ") for over 30 seconds", "high");
-      offlineStartTime = 0;  
-    }
+    if (millis() - offlineStartTime >= OFFLINE_TIMER && !offlineNotifSent) {
+    send_notification("Bitaxe Offline", bitaxeDevices[i].name + " is not responding (HTTP " + String(httpCode) + ")", "high");
+    offlineNotifSent = true;  
+    
+  }
 
     bitaxeDevices[i].isConnected = false;
     Serial.printf("HTTP Error for active Bitaxe %d: Code %d\n", i + 1, httpCode);
@@ -1835,6 +2142,12 @@ void update_bitaxe_data() {
     delay(1000);  
     ESP.restart();
   }
+  unsigned long currentUptime = millis() / 1000;  
+  int exampleShares = bitaxeDevices[currentBitaxeIndex].sharesAccepted; 
+  Serial.printf("Heap: %u, MinHeap: %u, PSRAM: %u, MinBlock: %u | Uptime: %lu s | Shares: %d\n", 
+              ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getFreePsram(), ESP.getMaxAllocHeap(),
+              currentUptime, exampleShares);
+   
 }
 
 
@@ -1860,8 +2173,8 @@ void api_task(void* pvParameters) {
 
       vTaskDelay(10 / portTICK_PERIOD_MS);
       snprintf(dynamic_price_url, sizeof(dynamic_price_url),
-               "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd",
-               coin_id_buf);
+              "https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd&include_24hr_change=true",
+              coin_id_buf);
       httpClient.setConnectTimeout(1000);
       httpClient.setTimeout(2000);
       httpClient.begin(dynamic_price_url);
@@ -1876,7 +2189,9 @@ void api_task(void* pvParameters) {
         if (!deserializeJson(doc, resp)) {
           if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {
             btc_price_usd = doc[coin_id_buf]["usd"].as<double>();
+            usd_24h_change = doc[coin_id_buf]["usd_24h_change"].as<double>();
             xSemaphoreGive(api_data_mutex);
+            update_price_led_status();
           }
         }
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -1971,13 +2286,13 @@ void setup() {
     buf1 = (lv_color_t*)ps_malloc(320 * 60 * sizeof(lv_color_t));
     buf2 = (lv_color_t*)ps_malloc(320 * 60 * sizeof(lv_color_t));
   } else {
-    static lv_color_t buf1_fallback[320 * 20];
-    static lv_color_t buf2_fallback[320 * 20];
+    static lv_color_t buf1_fallback[320 * 30];
+    static lv_color_t buf2_fallback[320 * 30];
     buf1 = buf1_fallback;
     buf2 = buf2_fallback;
   }
   static lv_disp_draw_buf_t draw_buf;
-  lv_disp_draw_buf_init(&draw_buf, buf1, buf2, (ESP.getPsramSize() > 0) ? 320 * 60 : 320 * 20);
+  lv_disp_draw_buf_init(&draw_buf, buf1, buf2, (ESP.getPsramSize() > 0) ? 320 * 60 : 320 * 30);
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = 320;
@@ -1994,6 +2309,7 @@ void setup() {
   create_screen2();
   create_screen3();
   create_screen_achievements();
+  create_screen_clock();
   load_achievements();
 
 
@@ -2016,7 +2332,7 @@ void setup() {
     bitaxeDevices[i - 1].name = prefs.getString(("name" + String(i)).c_str(), "Bitaxe " + String(i));
   }
   int saved_rotation = prefs.getInt("rotation", 2);
-  bool led_off = prefs.getBool("led_off", false);
+  led_off = prefs.getBool("led_off", false);
   int display_timeout_min = prefs.getInt("disp_timeout", 0);
   selected_coin = prefs.getString("coin_select", "BTC");
   display_mode = prefs.getString("display_mode", "Solo");
@@ -2165,6 +2481,7 @@ void setup() {
     prefs.putBool("enabled", notifications_enabled);
     prefs.putString("topic", notification_topic);
     prefs.end();
+    delay(500);
   });
 
   show_wifi_instructions();
@@ -2251,30 +2568,64 @@ void setup() {
   restore_screen_state();
 }
 
+void update_price_led_status() {
+    if (led_off) return;  
+
+    if (xSemaphoreTake(api_data_mutex, portMAX_DELAY)) {  
+        if (usd_24h_change > 0) {
+            
+            digitalWrite(STATUS_LED_RED_PIN, HIGH);
+            digitalWrite(STATUS_LED_GREEN_PIN, LOW);
+            digitalWrite(STATUS_LED_BLUE_PIN, HIGH);
+        } else if (usd_24h_change < 0) {
+            
+            digitalWrite(STATUS_LED_RED_PIN, LOW);
+            digitalWrite(STATUS_LED_GREEN_PIN, HIGH);
+            digitalWrite(STATUS_LED_BLUE_PIN, HIGH);
+        }  
+        xSemaphoreGive(api_data_mutex);
+    }
+}
 
 void loop() {
-
   static uint32_t last_ms = millis();
   uint32_t now_ms = millis();
   lv_tick_inc(now_ms - last_ms);
   last_ms = now_ms;
 
+  
+  static unsigned long last_lvgl_call = 0;
+  if (millis() - last_lvgl_call >= 1) { 
+    lv_timer_handler();
+    last_lvgl_call = millis();
+    
+  }
 
   if (displayOn && DISPLAY_TIMEOUT_MS > 0 && (now_ms - lastTouchTime) >= DISPLAY_TIMEOUT_MS) {
     digitalWrite(BACKLIGHT_PIN, LOW);
     displayOn = false;
   }
 
-
-  lv_timer_handler();
-
   if (lv_disp_get_inactive_time(NULL) < 50) {
     display_activity_counter++;
     Serial.printf("Counter incremented (active LVGL): %lu\n", display_activity_counter);
   }
-  update_data();
-  check_achievements();
 
+  update_data();
+  update_clock_display();
+
+  static unsigned long last_clock_update = 0;
+  if (millis() - last_clock_update > 5000) {  
+    update_clock_display();
+    last_clock_update = millis();
+  }
+  static unsigned long last_weather_check = 0;
+  if (millis() - last_weather_check > 30000) {  
+    update_weather_data();  
+    last_weather_check = millis();
+  }
+
+  check_achievements();
 
   static unsigned long last_maint_check = 0;
   if (millis() - last_maint_check > 30000) {
@@ -2282,19 +2633,15 @@ void loop() {
     last_maint_check = millis();
   }
 
-
   static unsigned long last_heap_check = 0;
   if (millis() - last_heap_check > 30000) {
     check_heap_and_restart();
     last_heap_check = millis();
   }
 
-
   display_activity_counter++;
-
 
   check_display_freeze_simple();
 
-
-  delay(5);
+  delay(1); 
 }
