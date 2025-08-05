@@ -178,6 +178,17 @@ float lon = 0.0;
 bool weather_data_available = false;
 unsigned long last_weather_update = 0;
 const unsigned long weather_update_interval = 600000; 
+unsigned long last_status_time = 0;  
+const unsigned long STATUS_INTERVAL = 86400;  
+const unsigned long STATUS_CHECK_INTERVAL = 60000;  
+
+
+float sum_hashrate = 0.0;  
+float sum_temp = 0.0;      
+int sample_count = 0;      
+const unsigned long SAMPLE_INTERVAL = 1200000;  
+unsigned long last_sample_time = 0;
+unsigned long last_status_check = 0;  
 
 #define MAX_ACHIEVEMENT_QUEUE 10
 const char* achievement_queue[MAX_ACHIEVEMENT_QUEUE];
@@ -460,6 +471,11 @@ void check_display_freeze_simple() {
     save_current_screen_state();
     save_achievements();
     save_uptime_before_restart();
+    prefs.begin("notifications", false);
+    prefs.putFloat("sum_hr", sum_hashrate);
+    prefs.putFloat("sum_temp", sum_temp);
+    prefs.putInt("sample_cnt", sample_count);
+    prefs.end();
     delay(1000);
     Serial.println("Auto-restarting due to freeze...");
     ESP.restart();
@@ -538,17 +554,19 @@ void long_press_reset_handler(lv_event_t* e) {
 /********************************************************************
 * Achievement Queue and Popup
 *******************************************************************/
+bool send_notification(String title, String message, String priority = "default");
 void enqueue_achievement(const char* achievement_name) {
   if (queue_tail < MAX_ACHIEVEMENT_QUEUE) {
     achievement_queue[queue_tail] = achievement_name;
     queue_tail++;
+    if (notifications_enabled) send_notification("Achievement Unlocked", String(achievement_name));  // Neue Zeile hier einfügen
     if (!achievement_shown) {
       show_next_achievement();
     }
-    update_achievements_labels();
   } else {
     Serial.println("Achievement queue full, skipping...");
   }
+  update_achievements_labels();
 }
 
 void show_next_achievement() {
@@ -1177,23 +1195,23 @@ void create_screen_clock() {
   lv_obj_set_style_text_color(label_clock_weather, lv_color_hex(0x00FFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(label_clock_weather, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_label_set_long_mode(label_clock_weather, LV_LABEL_LONG_WRAP);  
-  lv_obj_set_width(label_clock_weather, 150);
+  lv_obj_set_width(label_clock_weather, 280);
   lv_label_set_text(label_clock_weather, "Weather: Loading...");
 
   
   label_clock_temperature = lv_label_create(screen_clock);
-  lv_obj_set_pos(label_clock_temperature, 10, 145);
+  lv_obj_set_pos(label_clock_temperature, 10, 160);
   lv_obj_set_style_text_color(label_clock_temperature, lv_color_hex(0x00FFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(label_clock_temperature, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_label_set_text(label_clock_temperature, "Temp: -- °C");
 
   
   label_clock_location = lv_label_create(screen_clock);
-  lv_obj_set_pos(label_clock_location, 10, 170);
+  lv_obj_set_pos(label_clock_location, 10, 185);
   lv_obj_set_style_text_color(label_clock_location, lv_color_hex(0x808080), LV_PART_MAIN);
   lv_obj_set_style_text_font(label_clock_location, &lv_font_montserrat_10, LV_PART_MAIN);
   lv_label_set_long_mode(label_clock_location, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(label_clock_location, 150);
+  lv_obj_set_width(label_clock_location, 280);
   lv_label_set_text(label_clock_location, "Location: --");
 
   
@@ -1529,7 +1547,7 @@ long long parse_diff(String diffStr) {
 * NTFY NOTIFICATION FUNCTION
 *******************************************************************/
 
-bool send_notification(String title, String message, String priority = "default") {
+bool send_notification(String title, String message, String priority) {
   if (notification_topic == "" || !notifications_enabled) return false;
 
 
@@ -1557,6 +1575,8 @@ bool send_notification(String title, String message, String priority = "default"
     tags = "warning,battery,zap";
   } else if (title == "Low Voltage Alert") {
     tags = "warning,exclamation,zap";
+  } else if (title == "Achievement Unlocked") { 
+    tags = "trophy,star"; 
   } else {
     tags = "information_source,bell";
   }
@@ -2566,6 +2586,12 @@ void setup() {
   session_start_time = millis();
   delay(2000);
   restore_screen_state();
+  prefs.begin("notifications", true);
+  last_status_time = prefs.getULong("last_status", 0);
+  sum_hashrate = prefs.getFloat("sum_hr", 0.0);
+  sum_temp = prefs.getFloat("sum_temp", 0.0);
+  sample_count = prefs.getInt("sample_cnt", 0);
+  prefs.end();
 }
 
 void update_price_led_status() {
@@ -2586,6 +2612,45 @@ void update_price_led_status() {
         xSemaphoreGive(api_data_mutex);
     }
 }
+
+void send_daily_status() {
+  time_t now;
+  time(&now);  
+  
+  String status_msg = "Daily Status:";
+  if (activeDevices > 0) {
+    BitaxeData& device = bitaxeDevices[currentBitaxeIndex];
+    
+    
+    status_msg += " Hashrate=" + String(device.hashRate, 2) + " TH/s | Temp=" + String(device.temp, 1) + "°C | Shares=" + String(device.sharesAccepted) + "/" + String(device.sharesRejected) + " | BTC=" + String(btc_price_usd, 0) + " USD";
+    
+    
+    if (sample_count > 0) {
+      float avg_hashrate = sum_hashrate / sample_count;
+      float avg_temp = sum_temp / sample_count;
+      status_msg += " | Avg HR (24h)=" + String(avg_hashrate, 2) + " TH/s | Avg Temp (24h)=" + String(avg_temp, 1) + "°C";
+    }
+  } else {
+    status_msg += " No active devices";
+  }
+  
+  send_notification("Daily Bitaxe Status", status_msg, "default");
+  
+  
+  sum_hashrate = 0.0;
+  sum_temp = 0.0;
+  sample_count = 0;
+  
+  
+  prefs.begin("notifications", false);
+  prefs.putULong("last_status", now);
+  prefs.putFloat("sum_hr", sum_hashrate);
+  prefs.putFloat("sum_temp", sum_temp);
+  prefs.putInt("sample_cnt", sample_count);
+  prefs.end();
+  last_status_time = now;
+}
+
 
 void loop() {
   static uint32_t last_ms = millis();
@@ -2642,6 +2707,32 @@ void loop() {
   display_activity_counter++;
 
   check_display_freeze_simple();
+
+  if (millis() - last_sample_time >= SAMPLE_INTERVAL && activeDevices > 0) {
+    BitaxeData& device = bitaxeDevices[currentBitaxeIndex];
+    sum_hashrate += device.hashRate;
+    sum_temp += device.temp;
+    sample_count++;
+    
+    
+    prefs.begin("notifications", false);
+    prefs.putFloat("sum_hr", sum_hashrate);
+    prefs.putFloat("sum_temp", sum_temp);
+    prefs.putInt("sample_cnt", sample_count);
+    prefs.end();
+    
+    last_sample_time = millis();
+  }
+
+  
+  if (millis() - last_status_check >= STATUS_CHECK_INTERVAL) {
+    time_t now;
+    time(&now);
+    if (now - last_status_time >= STATUS_INTERVAL) {
+      send_daily_status();
+    }
+    last_status_check = millis();
+  }
 
   delay(1); 
 }
