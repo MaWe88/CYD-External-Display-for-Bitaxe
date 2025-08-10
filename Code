@@ -178,17 +178,9 @@ float lon = 0.0;
 bool weather_data_available = false;
 unsigned long last_weather_update = 0;
 const unsigned long weather_update_interval = 600000; 
-unsigned long last_status_time = 0;  
-const unsigned long STATUS_INTERVAL = 86400;  
-const unsigned long STATUS_CHECK_INTERVAL = 60000;  
-
-
-float sum_hashrate = 0.0;  
-float sum_temp = 0.0;      
-int sample_count = 0;      
-const unsigned long SAMPLE_INTERVAL = 1200000;  
-unsigned long last_sample_time = 0;
-unsigned long last_status_check = 0;  
+unsigned long last_report_day = 0;  
+const int REPORT_HOUR = 10;    
+const int REPORT_MINUTE = 0;  
 
 #define MAX_ACHIEVEMENT_QUEUE 10
 const char* achievement_queue[MAX_ACHIEVEMENT_QUEUE];
@@ -471,11 +463,6 @@ void check_display_freeze_simple() {
     save_current_screen_state();
     save_achievements();
     save_uptime_before_restart();
-    prefs.begin("notifications", false);
-    prefs.putFloat("sum_hr", sum_hashrate);
-    prefs.putFloat("sum_temp", sum_temp);
-    prefs.putInt("sample_cnt", sample_count);
-    prefs.end();
     delay(1000);
     Serial.println("Auto-restarting due to freeze...");
     ESP.restart();
@@ -1843,6 +1830,7 @@ void update_data() {
     lv_label_set_text(label_current_bitaxe[0], indicatorText);
     lv_label_set_text(label_current_bitaxe[1], indicatorText);
     lv_label_set_text(label_current_bitaxe[2], indicatorText);
+    lv_label_set_text(label_current_bitaxe[3], indicatorText);
   }
 
 
@@ -2528,7 +2516,9 @@ void setup() {
   notifications_enabled = prefs.getBool("enabled", false);
   notification_topic = prefs.getString("topic", "");
   prefs.end();
-
+  prefs.begin("notifications", false); 
+  last_report_day = prefs.getULong("last_report_day", 0);
+  prefs.end();
 
   if (notifications_enabled && notification_topic != "") {
     send_notification("Bitaxe Monitor Started",
@@ -2586,12 +2576,6 @@ void setup() {
   session_start_time = millis();
   delay(2000);
   restore_screen_state();
-  prefs.begin("notifications", true);
-  last_status_time = prefs.getULong("last_status", 0);
-  sum_hashrate = prefs.getFloat("sum_hr", 0.0);
-  sum_temp = prefs.getFloat("sum_temp", 0.0);
-  sample_count = prefs.getInt("sample_cnt", 0);
-  prefs.end();
 }
 
 void update_price_led_status() {
@@ -2617,40 +2601,31 @@ void send_daily_status() {
   time_t now;
   time(&now);  
   
-  String status_msg = "Daily Status:";
-  if (activeDevices > 0) {
-    BitaxeData& device = bitaxeDevices[currentBitaxeIndex];
-    
-    
-    status_msg += " Hashrate=" + String(device.hashRate, 2) + " TH/s | Temp=" + String(device.temp, 1) + "°C | Shares=" + String(device.sharesAccepted) + "/" + String(device.sharesRejected) + " | BTC=" + String(btc_price_usd, 0) + " USD";
-    
-    
-    if (sample_count > 0) {
-      float avg_hashrate = sum_hashrate / sample_count;
-      float avg_temp = sum_temp / sample_count;
-      status_msg += " | Avg HR (24h)=" + String(avg_hashrate, 2) + " TH/s | Avg Temp (24h)=" + String(avg_temp, 1) + "°C";
+  String status_msg = "Daily Bitaxe Status:\n";
+  char price_str[30];
+  snprintf(price_str, sizeof(price_str), "BTC Price: %.0f USD\n", btc_price_usd);
+  status_msg += price_str;
+  
+  int connected_count = 0;
+  for (int i = 0; i < activeDevices; i++) {
+    if (bitaxeDevices[i].isConnected) {
+      connected_count++;
+      status_msg += "\nDevice " + bitaxeDevices[i].name + ":\n";
+      status_msg += "  Hashrate: " + String(bitaxeDevices[i].hashRate, 2) + " TH/s\n";
+      status_msg += "  Shares: " + String(bitaxeDevices[i].sharesAccepted) + "/" + String(bitaxeDevices[i].sharesRejected) + "\n";
+      status_msg += "  Best Diff: " + bitaxeDevices[i].bestDiff + "\n";
+      status_msg += "  Session Best Diff: " + bitaxeDevices[i].sessionDiff + "\n";
+      status_msg += "  Uptime: " + String(bitaxeDevices[i].uptimeSeconds) + " s\n";
+      status_msg += "  Temp: " + String(bitaxeDevices[i].temp, 1) + "°C\n";
     }
-  } else {
-    status_msg += " No active devices";
+  }
+  if (connected_count == 0) {
+    status_msg += "\nNo connected devices";
   }
   
   send_notification("Daily Bitaxe Status", status_msg, "default");
-  
-  
-  sum_hashrate = 0.0;
-  sum_temp = 0.0;
-  sample_count = 0;
-  
-  
-  prefs.begin("notifications", false);
-  prefs.putULong("last_status", now);
-  prefs.putFloat("sum_hr", sum_hashrate);
-  prefs.putFloat("sum_temp", sum_temp);
-  prefs.putInt("sample_cnt", sample_count);
-  prefs.end();
-  last_status_time = now;
-}
 
+}
 
 void loop() {
   static uint32_t last_ms = millis();
@@ -2707,31 +2682,27 @@ void loop() {
   display_activity_counter++;
 
   check_display_freeze_simple();
+  static unsigned long last_time_check = 0;
+  if (millis() - last_time_check >= 60000) {  
+      time_t now;
+      struct tm timeinfo;
+      time(&now);
+      localtime_r(&now, &timeinfo);  
 
-  if (millis() - last_sample_time >= SAMPLE_INTERVAL && activeDevices > 0) {
-    BitaxeData& device = bitaxeDevices[currentBitaxeIndex];
-    sum_hashrate += device.hashRate;
-    sum_temp += device.temp;
-    sample_count++;
-    
-    
-    prefs.begin("notifications", false);
-    prefs.putFloat("sum_hr", sum_hashrate);
-    prefs.putFloat("sum_temp", sum_temp);
-    prefs.putInt("sample_cnt", sample_count);
-    prefs.end();
-    
-    last_sample_time = millis();
-  }
-
-  
-  if (millis() - last_status_check >= STATUS_CHECK_INTERVAL) {
-    time_t now;
-    time(&now);
-    if (now - last_status_time >= STATUS_INTERVAL) {
-      send_daily_status();
-    }
-    last_status_check = millis();
+      
+      if (timeinfo.tm_hour == REPORT_HOUR && 
+          timeinfo.tm_min == REPORT_MINUTE && 
+          timeinfo.tm_yday != last_report_day) {  
+          
+          send_daily_status();  
+          
+          
+          last_report_day = timeinfo.tm_yday;
+          prefs.begin("notifications", false);
+          prefs.putULong("last_report_day", last_report_day);
+          prefs.end();
+      }
+      last_time_check = millis();
   }
 
   delay(1); 
