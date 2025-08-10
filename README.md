@@ -5,12 +5,14 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 
 
-## What's New in Version 3.3 (latest)
+## What's New in Version 3.3 & 3.4 (latest)
 - **4th Layout**: a layout perfect for your Desk. Clock with Hashrate and current Weather. Everything fetched automaticly via API
 
 - **New Notification**: If you unlock a Achievement, you will now get a notification via NTFY
   
 - **Status Led**: the status LED now behaves like a Price Up / Down indicator. Up -> green; Down -> red
+
+- **24h Status Report**: At 10am local time you will get a short overview with BTC Price and current Data for upto 5 Bitaxes
   
   ---
   
