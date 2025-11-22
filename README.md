@@ -7,7 +7,7 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 ## What's New in Version 3.5
 
-- fixed timezone and added DST option in Wifimanager
+- fixed timezone (hopefully)
 - fixed Bestdiff & SessionDiff due to API changes
 
   
