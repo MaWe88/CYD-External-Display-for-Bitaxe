@@ -5,11 +5,11 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 
 
 
-## What's New in Version 3.5
+## What's New in Version 3.5 / 3.5.1
 
 - fixed timezone (hopefully)
 - fixed Bestdiff & SessionDiff due to API changes in new AxeOS v2.11.0 (could be bugged if your Bitaxe is not on Version v2.11.0)
-
+- added option in Wifimanager to change between °C and °F
   
 
 ## Features
@@ -172,6 +172,8 @@ Follow the same steps as in Option 1, Step 3 to configure WiFi, Bitaxe URL, and 
 | **crashes**                     | - make sure you install the `reset_achievements.bin` first before installing `Bitaxe_Monitor.bin` if your upgrading from 2.1, 2.0 and so on. 
 | **Notification** not working    | Make sure you entered the correct topic you created in NTFY App in Wifimanager
 | **Weather**                     | If the API cant fetch your location via your IP ( while using a VPN for example) weather wont work. 
+| **Temperature Unit**            | After you changed from °C to °F or vice versa, you may need to restart the CYD or switch between 2 layouts to make it update the symbol
+                                    
 ---
 
 ## Fixing Color Issues
