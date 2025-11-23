@@ -8,7 +8,7 @@ Welcome to the Bitaxe Monitor Project! This custom UI allows you to monitor your
 ## What's New in Version 3.5
 
 - fixed timezone (hopefully)
-- fixed Bestdiff & SessionDiff due to API changes in new AXEOS v2.11.0 (could be bugged if your Bitaxe is not on Version v2.11.0)
+- fixed Bestdiff & SessionDiff due to API changes in new AxeOS v2.11.0 (could be bugged if your Bitaxe is not on Version v2.11.0)
 
   
 
