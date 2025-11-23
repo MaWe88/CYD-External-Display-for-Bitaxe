@@ -758,7 +758,14 @@ void create_bitaxe_indicator(lv_obj_t* screen, int screenIndex) {
     label_current_bitaxe[screenIndex] = lv_label_create(screen);
     lv_obj_align(label_current_bitaxe[screenIndex], LV_ALIGN_BOTTOM_RIGHT, -10, -10);
     lv_obj_set_style_text_color(label_current_bitaxe[screenIndex], lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_10, LV_PART_MAIN);
+
+    
+    if (screenIndex == 2) {
+      lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_22, LV_PART_MAIN);
+    } else {
+      lv_obj_set_style_text_font(label_current_bitaxe[screenIndex], &lv_font_montserrat_10, LV_PART_MAIN);
+    }
+
     lv_label_set_text(label_current_bitaxe[screenIndex], "Bitaxe 1/1");
   }
 }
