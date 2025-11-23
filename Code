@@ -60,8 +60,9 @@ const char* blockchain_hashrate_url = "https://blockchain.info/q/hashrate";
 
 char custom_display_rotation[2] = "2";
 
-String apiTimeStr = ""; // z.B. "12:34:56"
-String apiDateStr = ""; // z.B. "2025-11-23"
+String apiTimeStr = ""; 
+String apiDateStr = ""; 
+String temperature_unit = "celsius";
 
 unsigned long lastTouchTime = 0;
 bool displayOn = true;
@@ -1284,8 +1285,9 @@ void update_weather_data(bool force) {
     WiFiClient client;  
     HTTPClient http;
     String url = "http://api.open-meteo.com/v1/forecast?latitude=" + String(lat) +
-                 "&longitude=" + String(lon) +
-                 "&current=temperature_2m,weather_code&timezone=auto";  
+             "&longitude=" + String(lon) +
+             "&current=temperature_2m,weather_code&timezone=auto" +
+             "&temperature_unit=" + temperature_unit;
     http.begin(client, url);
     http.setConnectTimeout(15000);  
     int httpCode = http.GET();
@@ -1412,8 +1414,10 @@ void update_clock_display() {
     if (weather_data_available) {
       char weather_str[50];
       char temp_str[30];
+
       snprintf(weather_str, sizeof(weather_str), "Weather: %s", weather_description.c_str());
-      snprintf(temp_str, sizeof(temp_str), "Temp: %s°C", weather_temp.c_str());
+      snprintf(temp_str, sizeof(temp_str), "Temp: %s %s", weather_temp.c_str(),
+      temperature_unit == "celsius" ? "°C" : "°F");
       lv_label_set_text(label_clock_weather, weather_str);
       lv_label_set_text(label_clock_temperature, temp_str);
       lv_label_set_text(label_clock_location, weather_location.c_str());
@@ -2379,6 +2383,7 @@ void setup() {
   led_off = prefs.getBool("led_off", false);
   int display_timeout_min = prefs.getInt("disp_timeout", 0);
   selected_coin = prefs.getString("coin_select", "BTC");
+  temperature_unit = prefs.getString("temperatureunit", "celsius");
   display_mode = prefs.getString("display_mode", "Solo");
   prefs.end();
 
@@ -2454,6 +2459,11 @@ void setup() {
       <option value="5">After 5 min</option>
       <option value="30">After 30 min</option>
     </select><br><br>
+    <label for="temperatureunit">Weather Temperature Unit</label>
+    <select name="temperatureunit" id="temperatureunit">
+      <option value="celsius" selected>Celsius (°C)</option>
+      <option value="fahrenheit">Fahrenheit (°F)</option>
+    </select><br><br>
     <label for="coin_select">Select Coin for Price & Stats</label>
     <select name="coin_select">
       <option value="BTC">Bitcoin (BTC)</option>
@@ -2503,8 +2513,9 @@ void setup() {
     String displayTimeoutValue = wm.server->arg("display_timeout");
     String coinSelectValue = wm.server->arg("coin_select");
     String displayModeValue = wm.server->arg("display_mode");
-    
+    String tempUnitValue = wm.server->arg("temperatureunit");
 
+    prefs.putString("temperatureunit", tempUnitValue);
     prefs.putInt("num_devices", activeDevices);
     prefs.putInt("rotation", atoi(rotationValue.c_str()));
     prefs.putBool("led_off", ledOffValue == "1");
