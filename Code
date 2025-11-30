@@ -1592,8 +1592,6 @@ bool send_notification(String title, String message, String priority) {
     tags = "heavy_check_mark,+1";
   } else if (title == "Low Hashrate Alert") {
     tags = "chart_with_downwards_trend,warning";
-  } else if (title == "Bitaxe Monitor Started") {
-    tags = "rocket,computer";
   } else if (title == "High Rejected Shares") {
     tags = "warning,chart_with_downwards_trend,exclamation";
   } else if (title == "Low Power Alert") {
@@ -2571,11 +2569,6 @@ void setup() {
   prefs.begin("notifications", false); 
   last_report_day = prefs.getULong("last_report_day", 0);
   prefs.end();
-
-  if (notifications_enabled && notification_topic != "") {
-    send_notification("Bitaxe Monitor Started",
-                      "System initialized successfully", "default");
-  }
 
   tft.setRotation(saved_rotation);
   int touch_rotation;
